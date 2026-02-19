@@ -119,7 +119,7 @@ export class ServersService {
         createdByUserId: userId,
       },
       include: {
-        createdBy: {
+        users: {
           select: {
             id: true,
             email: true,
@@ -239,7 +239,7 @@ export class ServersService {
       take: limit,
       orderBy: { [sort as string]: order },
       include: {
-        createdBy: {
+        users: {
           select: {
             id: true,
             email: true,
@@ -270,7 +270,7 @@ export class ServersService {
         deletedAt: null,
       },
       include: {
-        createdBy: {
+        users: {
           select: {
             id: true,
             email: true,
@@ -432,7 +432,7 @@ export class ServersService {
       where: { id },
       data: updateData,
       include: {
-        createdBy: {
+        users: {
           select: {
             id: true,
             email: true,
@@ -882,7 +882,7 @@ export class ServersService {
         testedAt: 'desc',
       },
       include: {
-        triggeredBy: {
+        users: {
           select: {
             id: true,
             email: true,

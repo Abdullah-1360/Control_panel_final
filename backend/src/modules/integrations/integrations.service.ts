@@ -45,7 +45,7 @@ export class IntegrationsService {
             username: true,
           },
         },
-        linkedServer: {
+        servers: {
           select: {
             id: true,
             name: true,
@@ -97,7 +97,7 @@ export class IntegrationsService {
             username: true,
           },
         },
-        linkedServer: {
+        servers: {
           select: {
             id: true,
             name: true,
@@ -125,7 +125,7 @@ export class IntegrationsService {
             username: true,
           },
         },
-        linkedServer: {
+        servers: {
           select: {
             id: true,
             name: true,
@@ -175,7 +175,7 @@ export class IntegrationsService {
             username: true,
           },
         },
-        linkedServer: {
+        servers: {
           select: {
             id: true,
             name: true,

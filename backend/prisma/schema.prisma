@@ -110,7 +110,7 @@ model email_templates {
   variables String[]
   isSystem  Boolean  @default(false)
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([key])
 }
@@ -282,7 +282,7 @@ model healing_action_logs {
   approvedBy        String?
   approvedAt        DateTime?
   createdAt         DateTime           @default(now())
-  updatedAt         DateTime
+  updatedAt         DateTime @updatedAt
   healer_backups    healer_backups?    @relation(fields: [backupId], references: [id])
   healer_executions healer_executions? @relation(fields: [executionId], references: [id])
   wp_sites          wp_sites           @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -310,7 +310,7 @@ model healing_patterns {
   lastSuccessAt   DateTime?
   lastFailureAt   DateTime?
   createdAt       DateTime      @default(now())
-  updatedAt       DateTime
+  updatedAt       DateTime @updatedAt
   lastUsedAt      DateTime      @default(now())
   commandSequence String[]      @default([])
   verified        Boolean       @default(false)
@@ -342,7 +342,7 @@ model healing_workflows {
   skippedSteps         Int           @default(0)
   startedAt            DateTime      @default(now())
   completedAt          DateTime?
-  updatedAt            DateTime
+  updatedAt            DateTime @updatedAt
   wp_sites             wp_sites      @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@index([siteId])
@@ -384,7 +384,7 @@ model integrations {
   linkedServerId  String?
   createdByUserId String
   createdAt       DateTime         @default(now())
-  updatedAt       DateTime
+  updatedAt       DateTime @updatedAt
   users           users            @relation(fields: [createdByUserId], references: [id])
   servers         servers?         @relation(fields: [linkedServerId], references: [id])
   webhook_events  webhook_events[]
@@ -425,7 +425,7 @@ model notification_rules {
   isActive       Boolean             @default(true)
   createdBy      String
   createdAt      DateTime            @default(now())
-  updatedAt      DateTime
+  updatedAt      DateTime @updatedAt
   email_history  email_history[]
 
   @@index([isActive])
@@ -465,7 +465,7 @@ model roles {
   description String?
   isSystem    Boolean       @default(false)
   createdAt   DateTime      @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
   permissions permissions[]
   users       users[]
 }
@@ -488,7 +488,7 @@ model scheduled_diagnosis {
   nextRunAt              DateTime?
   consecutiveFailures    Int              @default(0)
   createdAt              DateTime         @default(now())
-  updatedAt              DateTime
+  updatedAt              DateTime @updatedAt
   wp_sites               wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@index([enabled])
@@ -583,7 +583,7 @@ model servers {
   lastTestResult        Json?
   createdByUserId       String
   createdAt             DateTime              @default(now())
-  updatedAt             DateTime
+  updatedAt             DateTime @updatedAt
   deletedAt             DateTime?
   alertCpuThreshold     Float                 @default(90.0)
   alertDiskThreshold    Float                 @default(90.0)
@@ -632,7 +632,7 @@ model settings {
   isEncrypted Boolean  @default(false)
   description String?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
 
   @@index([key])
 }
@@ -659,7 +659,7 @@ model users {
   passwordHistory       String[]
   roleId                String
   createdAt             DateTime                @default(now())
-  updatedAt             DateTime
+  updatedAt             DateTime @updatedAt
   deletedAt             DateTime?
   audit_logs            audit_logs[]
   integrations          integrations[]
@@ -719,7 +719,7 @@ model wp_sites {
   healingAttempts           Int                         @default(0)
   lastDiagnosedAt           DateTime?
   createdAt                 DateTime                    @default(now())
-  updatedAt                 DateTime
+  updatedAt                 DateTime @updatedAt
   availableSubdomains       Json?
   circuitBreakerResetAt     DateTime?
   circuitBreakerState       CircuitBreakerState         @default(CLOSED)

@@ -80,7 +80,7 @@ export class HealerService {
       this.prisma.wp_sites.findMany({
         where,
         include: {
-          server: {
+          servers: {
             select: {
               id: true,
               host: true,

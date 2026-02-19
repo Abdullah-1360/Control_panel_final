@@ -249,7 +249,7 @@ export class BackupService {
     try {
       const backup = await this.prisma.healer_backups.findUnique({
         where: { id: backupId },
-        include: { site: true },
+        include: { wp_sites: true },
       });
 
       if (!backup) {
@@ -344,7 +344,7 @@ export class BackupService {
           },
           status: 'COMPLETED',
         },
-        include: { site: true },
+        include: { wp_sites: true },
       });
 
       this.logger.log(`Found ${expiredBackups.length} expired backups`);

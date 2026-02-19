@@ -38,7 +38,7 @@ export class ManualDiagnosisService {
 
     const site = await this.prisma.wp_sites.findUnique({
       where: { id: siteId },
-      include: { server: true },
+      include: { servers: true },
     });
 
     if (!site) {
@@ -99,7 +99,7 @@ export class ManualDiagnosisService {
 
     const session = await this.prisma.manual_diagnosis_sessions.findUnique({
       where: { id: sessionId },
-      include: { site: { include: { server: true } } },
+      include: { wp_sites: { include: { servers: true } } },
     });
 
     if (!session) {
@@ -197,7 +197,7 @@ export class ManualDiagnosisService {
   ): Promise<CommandSuggestion[]> {
     const session = await this.prisma.manual_diagnosis_sessions.findUnique({
       where: { id: sessionId },
-      include: { site: true },
+      include: { wp_sites: true },
     });
 
     if (!session) {
@@ -246,7 +246,7 @@ export class ManualDiagnosisService {
 
     const session = await this.prisma.manual_diagnosis_sessions.findUnique({
       where: { id: sessionId },
-      include: { site: { include: { server: true } } },
+      include: { wp_sites: { include: { servers: true } } },
     });
 
     if (!session) {
@@ -298,7 +298,7 @@ export class ManualDiagnosisService {
 
     const session = await this.prisma.manual_diagnosis_sessions.findUnique({
       where: { id: sessionId },
-      include: { site: true },
+      include: { wp_sites: true },
     });
 
     if (!session) {

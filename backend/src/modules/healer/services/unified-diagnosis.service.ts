@@ -77,7 +77,7 @@ export class UnifiedDiagnosisService {
     // Get site details
     const site = await this.prisma.wp_sites.findUnique({
       where: { id: siteId },
-      include: { server: true },
+      include: { servers: true },
     });
 
     if (!site) {

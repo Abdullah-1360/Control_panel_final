@@ -572,7 +572,7 @@ export class AuthService {
     // Find token
     const resetToken = await this.prisma.password_reset_tokens.findUnique({
       where: { tokenHash },
-      include: { user: true },
+      include: { users: true },
     });
 
     if (!resetToken || resetToken.used || !resetToken.user) {

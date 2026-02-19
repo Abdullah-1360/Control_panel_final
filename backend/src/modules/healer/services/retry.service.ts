@@ -23,7 +23,7 @@ export class RetryService {
   ): Promise<RetryDecision> {
     const execution = await this.prisma.healer_executions.findUnique({
       where: { id: executionId },
-      include: { site: true },
+      include: { wp_sites: true },
     });
 
     if (!execution) {
