@@ -1,0 +1,31 @@
+// Manual Diagnosis Session Model
+// This will be added to the main schema.prisma
+
+model ManualDiagnosisSession {
+  id          String   @id @default(cuid())
+  siteId      String
+  site        WpSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  // Session data
+  commands    Json     @default("[]") // [{command, output, timestamp, wasSuccessful, duration}]
+  status      String   @default("ACTIVE") // ACTIVE, AUTO_MODE, COMPLETED, CANCELLED
+  findings    Json?    // Final diagnosis findings
+  
+  // Pattern learning
+  learnedPatternId String?
+  
+  // Metadata
+  startedBy   String?  // User ID when Module 1 is integrated
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  @@index([siteId])
+  @@index([status])
+  @@map("manual_diagnosis_sessions")
+}
+
+// Update to HealingPattern model (add these fields)
+// verified         Boolean  @default(false)
+// commandSequence  String[] @default([])
+// verifiedBy       String?  // User ID who verified
+// verifiedAt       DateTime?

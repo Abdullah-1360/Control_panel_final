@@ -1,0 +1,206 @@
+// Module 4: WordPress Auto-Healer Schema
+// Add this to your main schema.prisma file
+
+model WpSite {
+  id              String   @id @default(uuid())
+  
+  // Server & Integration
+  serverId        String
+  server          Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  
+  // Site Identity
+  domain          String   @unique
+  path            String   // /home/user/public_html
+  cPanelUsername  String?
+  
+  // WordPress Info
+  wpVersion       String?
+  phpVersion      String?
+  dbName          String?
+  dbHost          String?  @default("localhost")
+  
+  // Healer Configuration
+  healingMode     HealingMode @default(MANUAL) // MANUAL, SEMI_AUTO, FULL_AUTO
+  isHealerEnabled Boolean  @default(false)
+  maxHealingAttempts Int   @default(3)
+  healingCooldown Int      @default(1800) // 30 minutes in seconds
+  
+  // Plugin/Theme Blacklist
+  blacklistedPlugins String[] @default(["woocommerce", "woocommerce-*"])
+  blacklistedThemes  String[]
+  
+  // Health Status
+  healthStatus    HealthStatus @default(UNKNOWN)
+  lastHealthCheck DateTime?
+  healthScore     Int?         // 0-100
+  lastError       String?      @db.Text
+  
+  // Operational
+  lastHealedAt    DateTime?
+  healingAttempts Int          @default(0)
+  lastDiagnosedAt DateTime?
+  
+  // Relations
+  executions      HealerExecution[]
+  backups         HealerBackup[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([serverId])
+  @@index([healthStatus])
+  @@index([isHealerEnabled])
+  @@index([domain])
+  @@map("wp_sites")
+}
+
+model HealerExecution {
+  id              String   @id @default(uuid())
+  
+  // Site
+  siteId          String
+  site            WpSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  // Trigger
+  trigger         HealerTrigger // MANUAL, SEMI_AUTO, FULL_AUTO, SEARCH
+  triggeredBy     String?       // User ID if manual
+  
+  // Diagnosis
+  diagnosisType   DiagnosisType
+  diagnosisDetails String       @db.Text // JSON with detailed diagnosis
+  confidence      Float         // 0.0-1.0
+  logsAnalyzed    String        @db.Text // JSON array of log files analyzed
+  
+  // Suggested Fix
+  suggestedAction String        @db.Text // Human-readable description
+  suggestedCommands String      @db.Text // JSON array of commands
+  
+  // Healing
+  actionTaken     String?       @db.Text // Actual commands executed
+  
+  // Backup
+  backupId        String?
+  backup          HealerBackup? @relation(fields: [backupId], references: [id])
+  
+  // Status
+  status          HealerStatus
+  errorMessage    String?       @db.Text
+  
+  // Logs (real-time streaming)
+  executionLogs   String        @db.Text // JSON array of log entries
+  
+  // Timing
+  startedAt       DateTime      @default(now())
+  diagnosedAt     DateTime?
+  approvedAt      DateTime?     // When user clicked "Fix" button
+  healedAt        DateTime?
+  verifiedAt      DateTime?
+  finishedAt      DateTime?
+  duration        Int?          // milliseconds
+  
+  // Verification
+  preHealthScore  Int?
+  postHealthScore Int?
+  wasSuccessful   Boolean       @default(false)
+  
+  @@index([siteId])
+  @@index([status])
+  @@index([trigger])
+  @@index([diagnosisType])
+  @@index([startedAt])
+  @@map("healer_executions")
+}
+
+model HealerBackup {
+  id              String   @id @default(uuid())
+  
+  // Site
+  siteId          String
+  site            WpSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  // Backup Details
+  backupType      BackupType // FILE, DATABASE, FULL
+  filePath        String     // Path to backup file on server
+  fileSize        Int?       // bytes
+  
+  // Metadata
+  backupData      String     @db.Text // JSON with backup metadata
+  
+  // Status
+  status          BackupStatus
+  
+  // Relations
+  executions      HealerExecution[]
+  
+  // Timing
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime // Auto-delete after 7 days
+  
+  @@index([siteId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("healer_backups")
+}
+
+// Enums
+enum HealingMode {
+  MANUAL      // User must click "Fix" button
+  SEMI_AUTO   // Show suggestion, auto-fix after 30s if not cancelled
+  FULL_AUTO   // Automatically fix without user approval
+}
+
+enum HealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  DOWN
+  MAINTENANCE
+  HEALING
+}
+
+enum HealerTrigger {
+  MANUAL      // User clicked "Diagnose" button
+  SEMI_AUTO   // Scheduled health check detected issue
+  FULL_AUTO   // Automatic healing triggered
+  SEARCH      // Triggered from search/discovery
+}
+
+enum DiagnosisType {
+  WSOD                // White Screen of Death
+  DB_ERROR            // Database connection error
+  MAINTENANCE         // Stuck maintenance mode
+  INTEGRITY           // Core file corruption
+  PERMISSION          // File permission error
+  CACHE               // Cache issues
+  PLUGIN_CONFLICT     // Plugin conflict
+  THEME_CONFLICT      // Theme conflict
+  MEMORY_EXHAUSTION   // PHP memory limit
+  SYNTAX_ERROR        // PHP syntax error
+  UNKNOWN
+}
+
+enum HealerStatus {
+  PENDING       // Queued for diagnosis
+  ANALYZING     // Reading logs
+  DIAGNOSED     // Diagnosis complete, awaiting approval
+  APPROVED      // User clicked "Fix" button
+  HEALING       // Executing fix
+  VERIFYING     // Checking if fix worked
+  SUCCESS       // Healing successful
+  FAILED        // Healing failed
+  SKIPPED       // User cancelled
+  ROLLED_BACK   // Rolled back to backup
+}
+
+enum BackupType {
+  FILE
+  DATABASE
+  FULL
+}
+
+enum BackupStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}

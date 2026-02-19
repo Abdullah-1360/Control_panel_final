@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Auto Memory Update",
+  "description": "Automatically updates the MCP memory graph with implementation progress, decisions, and bug fixes after each agent execution completes",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review the conversation that just completed and update the MCP memory graph with:\n1. Any module implementation progress (status updates, completion percentages)\n2. New technical decisions made (architecture, technology choices, patterns)\n3. Bug fixes and their solutions\n4. New entities created (implementations, features, components)\n5. Relations between entities (dependencies, integrations, implementations)\n\nUse mcp_memory_create_entities, mcp_memory_add_observations, mcp_memory_create_relations, and mcp_memory_delete_observations as needed.\n\nFocus on:\n- Module completion status changes\n- Implementation milestones reached\n- Technical decisions and their rationale\n- Bug fixes with root cause and solution\n- New technologies or patterns introduced\n- Integration points established\n\nKeep observations concise and factual. Only update if there's meaningful progress to record."
+  }
+}

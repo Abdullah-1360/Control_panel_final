@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Smart Memory Update",
+  "description": "Automatically checks if memory should be updated after significant work (module completions, major implementations, bug fixes) and updates if needed",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Analyze the conversation that just completed. ONLY update memory if ANY of these conditions are met:\n\n**Update Triggers:**\n1. Module completion status changed (e.g., sprint completed, module finished)\n2. Major implementation completed (e.g., new service, feature, or component)\n3. Critical bug fixed with documented solution\n4. Important technical decision made (architecture, technology, pattern)\n5. Integration point established between modules\n6. Testing milestone reached (e.g., >80% coverage achieved)\n\n**Skip Update If:**\n- Only minor code changes or tweaks\n- Just reading/exploring code\n- Answering questions without implementation\n- Already updated memory in this session\n\nIf update is needed, use MCP memory tools to:\n- Add observations to existing module entities\n- Create new entities for implementations/decisions/fixes\n- Create relations between entities\n- Keep updates concise and factual\n\nIf no update needed, simply respond: \"No significant progress to record in memory.\""
+  }
+}

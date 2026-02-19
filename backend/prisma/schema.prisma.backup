@@ -1,0 +1,984 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AuditLog {
+  id          String @id @default(uuid())    @id
+  userId      String?
+  actorType   ActorType
+  actorId     String?
+  action      String
+  resource    String
+  resourceId  String?
+  description String
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  severity    Severity
+  timestamp   DateTime  @default(now())
+  users       users?    @relation(fields: [userId], references: [id])
+
+  @@index([action])
+  @@index([resource])
+  @@index([severity])
+  @@index([timestamp])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model DiagnosisCache {
+  id             String @id @default(uuid())           @id
+  serverId       String
+  sitePath       String
+  domain         String
+  profile        DiagnosisProfile
+  result         Json
+  healthScore    Int?
+  createdAt      DateTime         @default(now())
+  expiresAt      DateTime
+  hitCount       Int              @default(0)
+  lastAccessedAt DateTime         @default(now())
+
+  @@unique([serverId, sitePath, domain, profile])
+  @@index([expiresAt])
+  @@index([serverId])
+  @@map("diagnosis_cache")
+}
+
+model DiagnosisHistory {
+  id               String @id @default(uuid())           @id
+  siteId           String
+  subdomain        String?
+  domain           String
+  profile          DiagnosisProfile
+  checksRun        String[]
+  diagnosisType    DiagnosisType
+  healthScore      Int?
+  issuesFound      Int              @default(0)
+  criticalIssues   Int              @default(0)
+  warningIssues    Int              @default(0)
+  diagnosisDetails Json
+  commandOutputs   Json
+  duration         Int
+  triggeredBy      String?
+  trigger          HealerTrigger
+  createdAt        DateTime         @default(now())
+  wp_sites         wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([healthScore])
+  @@index([profile])
+  @@index([siteId])
+  @@map("diagnosis_history")
+}
+
+model EmailHistory {
+  id                 String @id @default(uuid())              @id
+  ruleId             String?
+  templateKey        String
+  recipients         String[]
+  subject            String
+  htmlBody           String
+  textBody           String
+  variables          Json
+  status             EmailStatus
+  sentAt             DateTime?
+  failedAt           DateTime?
+  error              String?
+  deliveryStatus     DeliveryStatus?
+  triggeredBy        String
+  triggerEvent       String
+  createdAt          DateTime            @default(now())
+  notification_rules notification_rules? @relation(fields: [ruleId], references: [id])
+
+  @@index([createdAt])
+  @@index([ruleId])
+  @@index([status])
+  @@index([triggerEvent])
+  @@index([triggeredBy])
+  @@map("email_history")
+}
+
+model EmailTemplate {
+  id        String @id @default(uuid())   @id
+  key       String   @unique
+  name      String
+  subject   String
+  htmlBody  String
+  textBody  String
+  variables String[]
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@map("email_templates")
+}
+
+model HealerAlert {
+  id             String @id @default(uuid())        @id
+  title          String
+  message        String
+  metadata       String?
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  alertType      AlertType
+  createdAt      DateTime      @default(now())
+  executionId    String?
+  resolvedAt     DateTime?
+  siteId         String?
+  severity       AlertSeverity
+  status         AlertStatus   @default(ACTIVE)
+
+  @@index([alertType])
+  @@index([createdAt])
+  @@index([status, severity])
+  @@map("healer_alerts")
+}
+
+model HealerAuditLog {
+  id           String @id @default(uuid())            @id
+  resource     String
+  details      String
+  changes      String?
+  success      Boolean
+  timestamp    DateTime          @default(now())
+  duration     Int?
+  errorMessage String?
+  executionId  String?
+  ipAddress    String?
+  resourceType AuditResourceType
+  siteId       String?
+  userAgent    String?
+  userEmail    String?
+  userId       String?
+  action       AuditAction
+
+  @@index([action, timestamp])
+  @@index([siteId, timestamp])
+  @@index([timestamp])
+  @@index([userId, timestamp])
+  @@map("healer_audit_logs")
+}
+
+model HealerBackup {
+  id                  String @id @default(uuid())                @id
+  siteId              String
+  backupType          BackupType
+  filePath            String
+  fileSize            Int?
+  backupData          String
+  status              BackupStatus
+  createdAt           DateTime              @default(now())
+  expiresAt           DateTime
+  wp_sites            wp_sites              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  healer_executions   healer_executions[]
+  healing_action_logs healing_action_logs[]
+
+  @@index([expiresAt])
+  @@index([siteId])
+  @@index([status])
+  @@map("healer_backups")
+}
+
+model HealerExecution {
+  id                      String @id @default(uuid())                @id
+  siteId                  String
+  trigger                 HealerTrigger
+  triggeredBy             String?
+  diagnosisType           DiagnosisType
+  diagnosisDetails        String
+  confidence              Float
+  logsAnalyzed            String
+  suggestedAction         String
+  suggestedCommands       String
+  actionTaken             String?
+  backupId                String?
+  status                  HealerStatus
+  errorMessage            String?
+  executionLogs           String
+  startedAt               DateTime              @default(now())
+  diagnosedAt             DateTime?
+  approvedAt              DateTime?
+  healedAt                DateTime?
+  verifiedAt              DateTime?
+  finishedAt              DateTime?
+  duration                Int?
+  preHealthScore          Int?
+  postHealthScore         Int?
+  wasSuccessful           Boolean               @default(false)
+  subdomain               String?
+  aiAnalysis              String?
+  aiConfidence            Float?
+  aiModel                 String?
+  aiReasoning             String?
+  aiRecommendations       String?
+  aiTokensUsed            Int?
+  attemptNumber           Int                   @default(1)
+  maxAttempts             Int                   @default(3)
+  postHealingMetrics      String?
+  preHealingMetrics       String?
+  previousAttemptId       String?
+  retryAfter              DateTime?
+  retryReason             String?
+  verificationChecks      String?
+  verificationResults     String?
+  verificationScore       Int?
+  healer_backups          healer_backups?       @relation(fields: [backupId], references: [id])
+  healer_executions       healer_executions?    @relation("healer_executionsTohealer_executions", fields: [previousAttemptId], references: [id], onUpdate: NoAction)
+  other_healer_executions healer_executions[]   @relation("healer_executionsTohealer_executions")
+  wp_sites                wp_sites              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  healing_action_logs     healing_action_logs[]
+
+  @@index([diagnosisType])
+  @@index([siteId])
+  @@index([startedAt])
+  @@index([status])
+  @@index([trigger])
+  @@map("healer_executions")
+}
+
+model HealerMetrics {
+  id                      String @id @default(uuid())           @id
+  avgDiagnosisTime        Int?
+  avgHealingTime          Int?
+  avgVerificationScore    Float?
+  createdAt               DateTime         @default(now())
+  dbErrorCount            Int              @default(0)
+  failedHealings          Int              @default(0)
+  firstAttemptSuccessRate Float?
+  healingSuccessRate      Float?
+  healthyCount            Int              @default(0)
+  otherErrorCount         Int              @default(0)
+  patternSuccessRate      Float?
+  patternsApplied         Int              @default(0)
+  patternsLearned         Int              @default(0)
+  periodEnd               DateTime
+  periodStart             DateTime
+  periodType              MetricPeriodType
+  rolledBackHealings      Int              @default(0)
+  successfulHealings      Int              @default(0)
+  syntaxErrorCount        Int              @default(0)
+  totalDiagnoses          Int              @default(0)
+  totalHealings           Int              @default(0)
+  wsodCount               Int              @default(0)
+
+  @@index([periodStart, periodType])
+  @@index([periodType])
+  @@map("healer_metrics")
+}
+
+model HealingActionLog {
+  id                String @id @default(uuid())             @id
+  executionId       String?
+  siteId            String
+  actionType        String
+  actionDetails     Json
+  beforeState       Json?
+  afterState        Json?
+  backupId          String?
+  status            HealerStatus
+  errorMessage      String?
+  duration          Int?
+  canRollback       Boolean            @default(false)
+  rolledBackAt      DateTime?
+  rollbackReason    String?
+  requiresApproval  Boolean            @default(true)
+  approvedBy        String?
+  approvedAt        DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt DateTime @updatedAt
+  healer_backups    healer_backups?    @relation(fields: [backupId], references: [id])
+  healer_executions healer_executions? @relation(fields: [executionId], references: [id])
+  wp_sites          wp_sites           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([executionId])
+  @@index([siteId])
+  @@index([status])
+  @@map("healing_action_logs")
+}
+
+model HealingPattern {
+  id              String @id @default(uuid())        @id
+  diagnosisType   DiagnosisType
+  errorType       String?
+  culprit         String?
+  errorPattern    String
+  commands        String[]
+  description     String
+  successCount    Int           @default(0)
+  failureCount    Int           @default(0)
+  confidence      Float         @default(0.0)
+  autoApproved    Boolean       @default(false)
+  requiresBackup  Boolean       @default(true)
+  createdBy       String?
+  lastSuccessAt   DateTime?
+  lastFailureAt   DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsedAt      DateTime      @default(now())
+  commandSequence String[]      @default([])
+  verified        Boolean       @default(false)
+  verifiedAt      DateTime?
+  verifiedBy      String?
+
+  @@index([autoApproved])
+  @@index([confidence])
+  @@index([diagnosisType, errorType])
+  @@index([verified])
+  @@map("healing_patterns")
+}
+
+model HealingWorkflow {
+  id                   String @id @default(uuid())        @id
+  siteId               String
+  name                 String
+  description          String
+  diagnosisType        DiagnosisType
+  steps                Json
+  currentStep          Int           @default(0)
+  status               HealerStatus
+  isPaused             Boolean       @default(false)
+  pausedAt             DateTime?
+  pauseReason          String?
+  requiresStepApproval Boolean       @default(true)
+  autoResumeAfter      Int?
+  completedSteps       Int           @default(0)
+  failedSteps          Int           @default(0)
+  skippedSteps         Int           @default(0)
+  startedAt            DateTime      @default(now())
+  completedAt          DateTime?
+  updatedAt DateTime @updatedAt
+  wp_sites             wp_sites      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([status])
+  @@map("healing_workflows")
+}
+
+model HealthScoreHistory {
+  id                String @id @default(uuid())           @id
+  siteId            String
+  score             Int
+  profile           DiagnosisProfile
+  availabilityScore Int
+  performanceScore  Int
+  securityScore     Int
+  integrityScore    Int
+  maintenanceScore  Int
+  createdAt         DateTime         @default(now())
+  wp_sites          wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId, createdAt])
+  @@map("health_score_history")
+}
+
+model Integration {
+  id              String @id @default(uuid())           @id
+  name            String
+  description     String?
+  provider        ProviderType
+  baseUrl         String?
+  username        String?
+  encryptedConfig String
+  isActive        Boolean          @default(true)
+  lastSyncAt      DateTime?
+  healthStatus    HealthStatus     @default(UNKNOWN)
+  lastTestAt      DateTime?
+  lastTestSuccess Boolean?
+  lastTestMessage String?
+  lastTestLatency Int?
+  lastError       String?
+  linkedServerId  String?
+  createdByUserId String
+  createdAt       DateTime         @default(now())
+  updatedAt DateTime @updatedAt
+  users           users            @relation(fields: [createdByUserId], references: [id])
+  servers         servers?         @relation(fields: [linkedServerId], references: [id])
+  webhook_events  webhook_events[]
+
+  @@index([createdByUserId])
+  @@index([healthStatus])
+  @@index([isActive])
+  @@index([linkedServerId])
+  @@index([provider])
+  @@map("integrations")
+}
+
+model ManualDiagnosisSession {
+  id               String @id @default(uuid())    @id
+  siteId           String
+  commands         Json      @default("[]")
+  status           String    @default("ACTIVE")
+  findings         Json?
+  learnedPatternId String?
+  startedBy        String?
+  createdAt        DateTime  @default(now())
+  completedAt      DateTime?
+  wp_sites         wp_sites  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([status])
+  @@map("manual_diagnosis_sessions")
+}
+
+model NotificationRule {
+  id             String @id @default(uuid())              @id
+  name           String
+  description    String?
+  trigger        NotificationTrigger
+  templateKey    String
+  recipientType  RecipientType
+  recipientValue Json
+  conditions     Json?
+  priority       Int                 @default(5)
+  isActive       Boolean             @default(true)
+  createdBy      String
+  createdAt      DateTime            @default(now())
+  updatedAt DateTime @updatedAt
+  email_history  email_history[]
+
+  @@index([isActive])
+  @@index([priority])
+  @@index([trigger])
+  @@map("notification_rules")
+}
+
+model PasswordResetToken {
+  id        String @id @default(uuid())   @id
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  users     users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([tokenHash])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Permission {
+  id       String @id @default(uuid()) @id
+  resource String
+  action   String
+  roleId   String
+  roles    roles  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, resource, action])
+  @@index([roleId])
+  @@map("permissions")
+}
+
+model Role {
+  id          String @id @default(uuid())        @id
+  name        String        @unique
+  displayName String
+  description String?
+  isSystem    Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt DateTime @updatedAt
+  permissions permissions[]
+  users       users[]
+  @@map("roles")
+}
+
+model ScheduledDiagnosis {
+  id                     String @id @default(uuid())           @id
+  siteId                 String           @unique
+  enabled                Boolean          @default(true)
+  profile                DiagnosisProfile @default(LIGHT)
+  intervalMinutes        Int              @default(15)
+  maintenanceWindowStart String?
+  maintenanceWindowEnd   String?
+  timezone               String           @default("UTC")
+  autoHealEnabled        Boolean          @default(false)
+  autoHealTypes          String[]
+  alertOnIssues          Boolean          @default(true)
+  alertChannels          String[]
+  alertThreshold         Int              @default(1)
+  lastRunAt              DateTime?
+  nextRunAt              DateTime?
+  consecutiveFailures    Int              @default(0)
+  createdAt              DateTime         @default(now())
+  updatedAt DateTime @updatedAt
+  wp_sites               wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@index([nextRunAt])
+  @@map("scheduled_diagnosis")
+}
+
+model ServerMetrics {
+  id                 String @id @default(uuid())   @id
+  serverId           String
+  cpuUsagePercent    Float
+  cpuCores           Int?
+  loadAverage1m      Float?
+  loadAverage5m      Float?
+  loadAverage15m     Float?
+  memoryTotalMB      Int
+  memoryUsedMB       Int
+  memoryFreeMB       Int
+  memoryAvailableMB  Int?
+  memoryUsagePercent Float
+  swapTotalMB        Int?
+  swapUsedMB         Int?
+  swapUsagePercent   Float?
+  diskTotalGB        Float
+  diskUsedGB         Float
+  diskFreeGB         Float
+  diskUsagePercent   Float
+  diskReadMBps       Float?
+  diskWriteMBps      Float?
+  diskIops           Int?
+  networkRxMBps      Float?
+  networkTxMBps      Float?
+  networkRxTotalMB   Float?
+  networkTxTotalMB   Float?
+  uptime             Int
+  processCount       Int?
+  threadCount        Int?
+  detectedOS         String?
+  kernelVersion      String?
+  collectionLatency  Int
+  collectionSuccess  Boolean  @default(true)
+  collectionError    String?
+  collectedAt        DateTime @default(now())
+  servers            servers  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([collectedAt])
+  @@index([serverId, collectedAt])
+  @@map("server_metrics")
+}
+
+model ServerTestHistory {
+  id                String @id @default(uuid())   @id
+  serverId          String
+  triggeredByUserId String
+  success           Boolean
+  message           String
+  latency           Int
+  details           Json
+  detectedOS        String?
+  detectedUsername  String?
+  errors            String[]
+  warnings          String[]
+  testedAt          DateTime @default(now())
+  servers           servers  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  users             users    @relation(fields: [triggeredByUserId], references: [id])
+
+  @@index([serverId])
+  @@index([testedAt])
+  @@index([triggeredByUserId])
+  @@map("server_test_history")
+}
+
+model Server {
+  id                    String @id @default(uuid())                @id
+  name                  String
+  environment           String?               @db.VarChar(20)
+  tags                  String[]
+  notes                 String?               @db.VarChar(1000)
+  platformType          String                @db.VarChar(20)
+  host                  String                @db.VarChar(255)
+  port                  Int
+  connectionProtocol    String                @db.VarChar(20)
+  username              String                @db.VarChar(100)
+  authType              String                @db.VarChar(50)
+  encryptedPrivateKey   String?
+  encryptedPassphrase   String?
+  encryptedPassword     String?
+  privilegeMode         String                @db.VarChar(20)
+  sudoMode              String                @db.VarChar(30)
+  encryptedSudoPassword String?
+  hostKeyStrategy       String                @db.VarChar(30)
+  knownHostFingerprints Json?
+  lastTestStatus        String?               @db.VarChar(20)
+  lastTestAt            DateTime?
+  lastTestResult        Json?
+  createdByUserId       String
+  createdAt             DateTime              @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt             DateTime?
+  alertCpuThreshold     Float                 @default(90.0)
+  alertDiskThreshold    Float                 @default(90.0)
+  alertRamThreshold     Float                 @default(95.0)
+  metricsEnabled        Boolean               @default(true)
+  metricsInterval       Int                   @default(900)
+  integrations          integrations[]
+  server_metrics        server_metrics[]
+  server_test_history   server_test_history[]
+  users                 users                 @relation(fields: [createdByUserId], references: [id])
+  wp_sites              wp_sites[]
+
+  @@index([createdByUserId])
+  @@index([deletedAt])
+  @@index([environment])
+  @@index([host])
+  @@index([lastTestStatus])
+  @@index([metricsEnabled])
+  @@index([name])
+  @@index([platformType])
+  @@map("servers")
+}
+
+model Session {
+  id                String @id @default(uuid())   @id
+  userId            String
+  token             String   @unique
+  refreshToken      String   @unique
+  ipAddress         String
+  userAgent         String
+  deviceFingerprint String?
+  expiresAt         DateTime
+  lastActivityAt    DateTime @default(now())
+  createdAt         DateTime @default(now())
+  users             users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([refreshToken])
+  @@index([token])
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Settings {
+  id          String @id @default(uuid())   @id
+  key         String   @unique
+  value       String
+  isEncrypted Boolean  @default(false)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@map("settings")
+}
+
+model User {
+  id                    String @id @default(uuid())                  @id
+  email                 String                  @unique
+  username              String                  @unique
+  passwordHash          String
+  firstName             String?
+  lastName              String?
+  avatarUrl             String?
+  mfaEnabled            Boolean                 @default(false)
+  mfaSecret             String?
+  mfaBackupCodes        String[]
+  isActive              Boolean                 @default(true)
+  isLocked              Boolean                 @default(false)
+  lockoutUntil          DateTime?
+  failedLoginAttempts   Int                     @default(0)
+  lastLoginAt           DateTime?
+  lastLoginIp           String?
+  passwordChangedAt     DateTime                @default(now())
+  mustChangePassword    Boolean                 @default(true)
+  passwordHistory       String[]
+  roleId                String
+  createdAt             DateTime                @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt             DateTime?
+  audit_logs            audit_logs[]
+  integrations          integrations[]
+  password_reset_tokens password_reset_tokens[]
+  server_test_history   server_test_history[]
+  servers               servers[]
+  sessions              sessions[]
+  roles                 roles                   @relation(fields: [roleId], references: [id])
+
+  @@index([email])
+  @@index([isActive])
+  @@index([roleId])
+  @@index([username])
+  @@map("users")
+}
+
+model WebhookEvent {
+  id              String @id @default(uuid())       @id
+  integrationId   String
+  eventType       String
+  payload         Json
+  headers         Json?
+  processed       Boolean      @default(false)
+  processedAt     DateTime?
+  processingError String?
+  sourceIp        String?
+  userAgent       String?
+  receivedAt      DateTime     @default(now())
+  integrations    integrations @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([eventType])
+  @@index([integrationId])
+  @@index([processed])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+model WpSite {
+  id                        String @id @default(uuid())                      @id
+  serverId                  String
+  domain                    String                      @unique
+  path                      String
+  cPanelUsername            String?
+  wpVersion                 String?
+  phpVersion                String?
+  dbName                    String?
+  dbHost                    String?                     @default("localhost")
+  healingMode               HealingMode                 @default(MANUAL)
+  isHealerEnabled           Boolean                     @default(false)
+  maxHealingAttempts        Int                         @default(3)
+  healingCooldown           Int                         @default(15)
+  blacklistedPlugins        String[]                    @default(["woocommerce", "woocommerce-*"])
+  blacklistedThemes         String[]
+  healthStatus              HealthStatus                @default(UNKNOWN)
+  lastHealthCheck           DateTime?
+  healthScore               Int?
+  lastError                 String?
+  lastHealedAt              DateTime?
+  healingAttempts           Int                         @default(0)
+  lastDiagnosedAt           DateTime?
+  createdAt                 DateTime                    @default(now())
+  updatedAt DateTime @updatedAt
+  availableSubdomains       Json?
+  circuitBreakerResetAt     DateTime?
+  circuitBreakerState       CircuitBreakerState         @default(CLOSED)
+  consecutiveFailures       Int                         @default(0)
+  lastCircuitBreakerOpen    DateTime?
+  maxRetries                Int                         @default(3)
+  retryDelayMs              Int                         @default(5000)
+  retryStrategy             RetryStrategy               @default(EXPONENTIAL)
+  diagnosis_history         diagnosis_history[]
+  healer_backups            healer_backups[]
+  healer_executions         healer_executions[]
+  healing_action_logs       healing_action_logs[]
+  healing_workflows         healing_workflows[]
+  health_score_history      health_score_history[]
+  manual_diagnosis_sessions manual_diagnosis_sessions[]
+  scheduled_diagnosis       scheduled_diagnosis?
+  servers                   servers                     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([circuitBreakerState])
+  @@index([domain])
+  @@index([healthStatus])
+  @@index([isHealerEnabled])
+  @@index([serverId])
+  @@map("wp_sites")
+}
+
+enum ActorType {
+  USER
+  SYSTEM
+  API
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  IGNORED
+}
+
+enum AlertType {
+  HIGH_FAILURE_RATE
+  CIRCUIT_BREAKER_OPEN
+  VERIFICATION_FAILED
+  PATTERN_DEGRADATION
+  SLOW_PERFORMANCE
+  BACKUP_FAILED
+  SYSTEM_ERROR
+}
+
+enum AuditAction {
+  DIAGNOSE_SITE
+  APPROVE_HEALING
+  EXECUTE_HEALING
+  ROLLBACK_HEALING
+  RESET_CIRCUIT_BREAKER
+  MODIFY_SITE_CONFIG
+  VIEW_EXECUTION
+  ACKNOWLEDGE_ALERT
+  RESOLVE_ALERT
+  EXECUTE_CUSTOM_COMMAND
+}
+
+enum AuditResourceType {
+  SITE
+  EXECUTION
+  ALERT
+  PATTERN
+  BACKUP
+}
+
+enum BackupStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum BackupType {
+  FILE
+  DATABASE
+  FULL
+}
+
+enum CircuitBreakerState {
+  CLOSED
+  OPEN
+  HALF_OPEN
+}
+
+enum DeliveryStatus {
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+}
+
+enum DiagnosisProfile {
+  FULL
+  LIGHT
+  QUICK
+  CUSTOM
+}
+
+enum DiagnosisType {
+  WSOD
+  DB_ERROR
+  MAINTENANCE
+  INTEGRITY
+  PERMISSION
+  CACHE
+  PLUGIN_CONFLICT
+  THEME_CONFLICT
+  MEMORY_EXHAUSTION
+  SYNTAX_ERROR
+  HEALTHY
+  UNKNOWN
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum HealerStatus {
+  PENDING
+  ANALYZING
+  DIAGNOSED
+  APPROVED
+  HEALING
+  VERIFYING
+  SUCCESS
+  FAILED
+  SKIPPED
+  ROLLED_BACK
+}
+
+enum HealerTrigger {
+  MANUAL
+  SEMI_AUTO
+  FULL_AUTO
+  SEARCH
+}
+
+enum HealingMode {
+  MANUAL
+  SEMI_AUTO
+  FULL_AUTO
+}
+
+enum HealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  DOWN
+  MAINTENANCE
+  HEALING
+}
+
+enum MetricPeriodType {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum NotificationTrigger {
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  USER_ACTIVATED
+  USER_DEACTIVATED
+  USER_ROLE_CHANGED
+  USER_LOCKED
+  USER_UNLOCKED
+  USER_LOGIN
+  USER_LOGOUT
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  MFA_ENABLED
+  MFA_DISABLED
+  FAILED_LOGIN_ATTEMPT
+  SESSION_CREATED
+  SESSION_REVOKED
+  SETTINGS_CHANGED
+}
+
+enum ProviderType {
+  WHM
+  CPANEL
+  PLESK
+  WHMCS
+  ANSIBLE
+  GIT_GITHUB
+  GIT_GITLAB
+  GIT_BITBUCKET
+  CRM_VTIGER
+  SLACK
+  DISCORD
+  TEAMS
+  SMTP
+  SMS_AWS_SNS
+  SMS_TWILIO
+}
+
+enum RecipientType {
+  SPECIFIC_USER
+  SPECIFIC_ROLE
+  AFFECTED_USER
+  ALL_USERS
+  CUSTOM_EMAIL
+  HYBRID
+}
+
+enum RetryStrategy {
+  IMMEDIATE
+  LINEAR
+  EXPONENTIAL
+  FIBONACCI
+}
+
+enum Severity {
+  INFO
+  WARNING
+  HIGH
+  CRITICAL
+}

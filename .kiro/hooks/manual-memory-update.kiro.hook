@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Update Memory Graph",
+  "description": "Manually trigger memory update to save current conversation progress, decisions, and implementations to the knowledge graph",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review the recent conversation history and update the MCP memory graph with:\n\n1. **Module Progress**: Any changes to module completion status, sprint completions, or implementation milestones\n2. **Technical Decisions**: Architecture choices, technology selections, design patterns adopted\n3. **Implementations**: New features, components, or services created\n4. **Bug Fixes**: Issues found and their solutions with root cause analysis\n5. **Integrations**: New connections between modules or external systems\n6. **Testing Results**: Test coverage, test results, or quality metrics\n\nUse these MCP memory tools:\n- mcp_memory_create_entities: For new implementations, decisions, or bug fixes\n- mcp_memory_add_observations: To update existing entities with new progress\n- mcp_memory_create_relations: To document dependencies and integrations\n- mcp_memory_delete_observations: To remove outdated information\n\nGuidelines:\n- Keep observations concise and factual (1-2 sentences each)\n- Include dates for time-sensitive information\n- Document rationale for decisions\n- Link related entities with appropriate relations\n- Only update if there's meaningful progress to record\n\nAfter updating, provide a brief summary of what was added to memory."
+  }
+}

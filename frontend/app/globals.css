@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer base {
+  :root {
+    --background: 230 15% 5%;
+    --foreground: 210 20% 96%;
+    --card: 230 14% 7%;
+    --card-foreground: 210 20% 96%;
+    --popover: 230 14% 8%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 160 84% 44%;
+    --primary-foreground: 230 15% 5%;
+    --secondary: 228 12% 11%;
+    --secondary-foreground: 210 15% 82%;
+    --muted: 228 12% 11%;
+    --muted-foreground: 220 10% 46%;
+    --accent: 228 12% 13%;
+    --accent-foreground: 210 15% 90%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 228 10% 13%;
+    --input: 228 10% 13%;
+    --ring: 160 84% 44%;
+    --chart-1: 160 84% 44%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 72% 56%;
+    --chart-5: 270 70% 60%;
+    --radius: 0.625rem;
+    --sidebar-background: 230 15% 4%;
+    --sidebar-foreground: 210 15% 80%;
+    --sidebar-primary: 160 84% 44%;
+    --sidebar-primary-foreground: 230 15% 5%;
+    --sidebar-accent: 228 12% 9%;
+    --sidebar-accent-foreground: 210 15% 90%;
+    --sidebar-border: 228 10% 11%;
+    --sidebar-ring: 160 84% 44%;
+    --success: 160 72% 40%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 5%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(228 10% 18%);
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(228 10% 26%);
+}
+
+/* Pulse animation for status dots */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Glow effect for primary elements */
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 8px hsl(160 84% 44% / 0.15); }
+  50% { box-shadow: 0 0 16px hsl(160 84% 44% / 0.25); }
+}
+.animate-glow {
+  animation: glow 3s ease-in-out infinite;
+}
+
+/* Subtle grid pattern background */
+.bg-grid {
+  background-image: 
+    linear-gradient(hsl(228 10% 10%) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(228 10% 10%) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, hsl(228 10% 15% / 0.3), transparent);
+  animation: shimmer 2s infinite;
+}

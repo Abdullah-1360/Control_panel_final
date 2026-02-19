@@ -1,0 +1,508 @@
+// Module 4: WordPress Auto-Healer Schema - Enhanced with Intelligence Features
+// This replaces schema-healer.prisma
+
+model WpSite {
+  id              String   @id @default(uuid())
+  
+  // Server & Integration
+  serverId        String
+  server          Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  
+  // Site Identity
+  domain          String   @unique
+  path            String   // /home/user/public_html
+  cPanelUsername  String?
+  
+  // Subdomain support
+  availableSubdomains Json? // Array of {subdomain, path}
+  
+  // WordPress Info
+  wpVersion       String?
+  phpVersion      String?
+  dbName          String?
+  dbHost          String?  @default("localhost")
+  
+  // Healer Configuration
+  healingMode     HealingMode @default(MANUAL)
+  isHealerEnabled Boolean  @default(false)
+  maxHealingAttempts Int   @default(3)
+  healingCooldown Int      @default(15) // 15 seconds (reduced from 1800)
+  
+  // Enhanced Circuit Breaker (Phase 1)
+  circuitBreakerState CircuitBreakerState @default(CLOSED)
+  lastCircuitBreakerOpen DateTime?
+  circuitBreakerResetAt DateTime?
+  consecutiveFailures Int @default(0)
+  
+  // Retry Configuration (Phase 1)
+  retryStrategy RetryStrategy @default(EXPONENTIAL)
+  maxRetries Int @default(3)
+  retryDelayMs Int @default(5000) // Initial delay
+  
+  // Plugin/Theme Blacklist
+  blacklistedPlugins String[] @default([])
+  blacklistedThemes  String[] @default([])
+  
+  // Health Status
+  healthStatus    HealthStatus @default(UNKNOWN)
+  lastHealthCheck DateTime?
+  healthScore     Int?         // 0-100
+  lastError       String?      @db.Text
+  
+  // Operational
+  lastHealedAt    DateTime?
+  healingAttempts Int          @default(0)
+  lastDiagnosedAt DateTime?
+  
+  // Relations
+  executions      HealerExecution[]
+  backups         HealerBackup[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([serverId])
+  @@index([healthStatus])
+  @@index([isHealerEnabled])
+  @@index([domain])
+  @@index([circuitBreakerState])
+  @@map("wp_sites")
+}
+
+model HealerExecution {
+  id              String   @id @default(uuid())
+  
+  // Site
+  siteId          String
+  site            WpSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  subdomain       String?  // For subdomain-specific healing
+  
+  // Trigger
+  trigger         HealerTrigger
+  triggeredBy     String?
+  
+  // Diagnosis
+  diagnosisType   DiagnosisType
+  diagnosisDetails String       @db.Text // JSON with detailed diagnosis
+  confidence      Float         // 0.0-1.0
+  logsAnalyzed    String        @db.Text // JSON array of log files analyzed
+  
+  // Suggested Fix
+  suggestedAction String        @db.Text
+  suggestedCommands String      @db.Text // JSON array of commands
+  
+  // Healing
+  actionTaken     String?       @db.Text
+  
+  // Backup
+  backupId        String?
+  backup          HealerBackup? @relation(fields: [backupId], references: [id])
+  
+  // Status
+  status          HealerStatus
+  errorMessage    String?       @db.Text
+  
+  // Logs (real-time streaming)
+  executionLogs   String        @db.Text // JSON array of log entries
+  
+  // Timing
+  startedAt       DateTime      @default(now())
+  diagnosedAt     DateTime?
+  approvedAt      DateTime?
+  healedAt        DateTime?
+  verifiedAt      DateTime?
+  finishedAt      DateTime?
+  duration        Int?          // milliseconds
+  
+  // Verification (Phase 1)
+  preHealthScore  Int?
+  postHealthScore Int?
+  wasSuccessful   Boolean       @default(false)
+  verificationResults String?   @db.Text // JSON with detailed verification
+  verificationScore   Int?      // 0-100
+  verificationChecks  String?   @db.Text // JSON array of checks performed
+  
+  // Performance Metrics (Phase 1)
+  preHealingMetrics   String?   @db.Text // JSON: response time, page size, etc.
+  postHealingMetrics  String?   @db.Text // JSON: response time, page size, etc.
+  
+  // Retry Tracking (Phase 1)
+  attemptNumber Int @default(1)
+  maxAttempts Int @default(3)
+  retryAfter DateTime?
+  retryReason String?
+  previousAttemptId String?
+  previousAttempt HealerExecution? @relation("RetryChain", fields: [previousAttemptId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  retryAttempts HealerExecution[] @relation("RetryChain")
+  
+  // AI Analysis (Phase 2)
+  aiAnalysis          String?  @db.Text // JSON with AI insights
+  aiConfidence        Float?   // 0.0-1.0
+  aiRecommendations   String?  @db.Text // JSON array
+  aiReasoning         String?  @db.Text // Explanation
+  aiModel             String?  // e.g., "gpt-4"
+  aiTokensUsed        Int?
+  
+  @@index([siteId])
+  @@index([status])
+  @@index([trigger])
+  @@index([diagnosisType])
+  @@index([startedAt])
+  @@index([attemptNumber])
+  @@index([previousAttemptId])
+  @@map("healer_executions")
+}
+
+model HealerBackup {
+  id              String   @id @default(uuid())
+  
+  // Site
+  siteId          String
+  site            WpSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  // Backup Details
+  backupType      BackupType
+  filePath        String
+  fileSize        Int?
+  
+  // Metadata
+  backupData      String     @db.Text // JSON with backup metadata
+  
+  // Status
+  status          BackupStatus
+  
+  // Relations
+  executions      HealerExecution[]
+  
+  // Timing
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime // Auto-delete after 7 days
+  
+  @@index([siteId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("healer_backups")
+}
+
+// Phase 1: Metrics & Monitoring
+model HealerMetrics {
+  id              String   @id @default(uuid())
+  
+  // Time period
+  periodStart     DateTime
+  periodEnd       DateTime
+  periodType      MetricPeriodType
+  
+  // Diagnosis metrics
+  totalDiagnoses    Int      @default(0)
+  healthyCount      Int      @default(0)
+  wsodCount         Int      @default(0)
+  dbErrorCount      Int      @default(0)
+  syntaxErrorCount  Int      @default(0)
+  otherErrorCount   Int      @default(0)
+  
+  // Healing metrics
+  totalHealings     Int      @default(0)
+  successfulHealings Int     @default(0)
+  failedHealings    Int      @default(0)
+  rolledBackHealings Int     @default(0)
+  
+  // Performance metrics
+  avgDiagnosisTime  Int?     // milliseconds
+  avgHealingTime    Int?     // milliseconds
+  avgVerificationScore Float?
+  
+  // Success rates
+  healingSuccessRate Float?  // 0.0-1.0
+  firstAttemptSuccessRate Float?
+  
+  // Pattern learning
+  patternsLearned   Int      @default(0)
+  patternsApplied   Int      @default(0)
+  patternSuccessRate Float?
+  
+  createdAt         DateTime @default(now())
+  
+  @@index([periodStart, periodType])
+  @@index([periodType])
+  @@map("healer_metrics")
+}
+
+// Phase 1: Alerting
+model HealerAlert {
+  id              String   @id @default(uuid())
+  
+  // Alert details
+  alertType       AlertType
+  severity        AlertSeverity
+  title           String
+  message         String   @db.Text
+  
+  // Context
+  siteId          String?
+  executionId     String?
+  metadata        String?  @db.Text // JSON
+  
+  // Status
+  status          AlertStatus @default(ACTIVE)
+  acknowledgedBy  String?
+  acknowledgedAt  DateTime?
+  resolvedAt      DateTime?
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([status, severity])
+  @@index([alertType])
+  @@index([createdAt])
+  @@index([siteId])
+  @@map("healer_alerts")
+}
+
+// Phase 1: Security Audit Logging
+model HealerAuditLog {
+  id              String   @id @default(uuid())
+  
+  // Actor
+  userId          String?
+  userEmail       String?
+  ipAddress       String?
+  userAgent       String?
+  
+  // Action
+  action          AuditAction
+  resource        String   // e.g., "site:abc123", "execution:def456"
+  resourceType    AuditResourceType
+  
+  // Details
+  details         String   @db.Text // JSON
+  changes         String?  @db.Text // JSON: before/after
+  
+  // Context
+  siteId          String?
+  executionId     String?
+  
+  // Result
+  success         Boolean
+  errorMessage    String?
+  
+  // Timing
+  timestamp       DateTime @default(now())
+  duration        Int?     // milliseconds
+  
+  @@index([userId, timestamp])
+  @@index([action, timestamp])
+  @@index([siteId, timestamp])
+  @@index([timestamp])
+  @@map("healer_audit_logs")
+}
+
+// Phase 2: AI Analysis Cache
+model AiAnalysisCache {
+  id              String   @id @default(uuid())
+  
+  // Input hash (for deduplication)
+  inputHash       String   @unique
+  
+  // Input data
+  diagnosisType   DiagnosisType
+  errorSignature  String   @db.Text // Normalized error signature
+  logSample       String   @db.Text // Sample of logs
+  
+  // AI response
+  analysis        String   @db.Text // JSON
+  confidence      Float
+  recommendations String   @db.Text // JSON array
+  reasoning       String   @db.Text
+  
+  // Metadata
+  model           String
+  tokensUsed      Int
+  responseTime    Int      // milliseconds
+  
+  // Usage tracking
+  hitCount        Int      @default(1)
+  lastUsedAt      DateTime @default(now())
+  
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime // Cache for 30 days
+  
+  @@index([inputHash])
+  @@index([diagnosisType])
+  @@index([expiresAt])
+  @@map("ai_analysis_cache")
+}
+
+// Enhanced Pattern Learning
+model HealingPattern {
+  id              String   @id @default(uuid())
+  
+  // Pattern Identity
+  name            String
+  description     String   @db.Text
+  
+  // Pattern Matching
+  diagnosisType   DiagnosisType
+  errorSignature  String   @db.Text // Regex or exact match
+  
+  // Commands
+  commands        String   @db.Text // JSON array of commands
+  
+  // Learning Metrics
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
+  totalAttempts   Int      @default(0)
+  successRate     Float    @default(0.0)
+  confidence      Float    @default(0.0) // 0.0-1.0
+  
+  // Auto-approval
+  autoApprove     Boolean  @default(false) // Auto-approve if confidence >90%
+  
+  // Versioning
+  version         Int      @default(1)
+  isActive        Boolean  @default(true)
+  
+  // Metadata
+  createdBy       String?  // User ID or "SYSTEM"
+  lastUsedAt      DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([diagnosisType])
+  @@index([successRate])
+  @@index([confidence])
+  @@index([isActive])
+  @@map("healing_patterns")
+}
+
+// Enums
+enum HealingMode {
+  MANUAL
+  SEMI_AUTO
+  FULL_AUTO
+}
+
+enum HealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  DOWN
+  MAINTENANCE
+  HEALING
+}
+
+enum HealerTrigger {
+  MANUAL
+  SEMI_AUTO
+  FULL_AUTO
+  SEARCH
+}
+
+enum DiagnosisType {
+  HEALTHY
+  WSOD
+  DB_ERROR
+  MAINTENANCE
+  INTEGRITY
+  PERMISSION
+  CACHE
+  PLUGIN_CONFLICT
+  THEME_CONFLICT
+  MEMORY_EXHAUSTION
+  SYNTAX_ERROR
+  PLUGIN_FAULT
+  THEME_FAULT
+  UNKNOWN
+}
+
+enum HealerStatus {
+  PENDING
+  ANALYZING
+  DIAGNOSED
+  APPROVED
+  HEALING
+  VERIFYING
+  SUCCESS
+  FAILED
+  SKIPPED
+  ROLLED_BACK
+}
+
+enum BackupType {
+  FILE
+  DATABASE
+  FULL
+}
+
+enum BackupStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+// Phase 1: New Enums
+enum CircuitBreakerState {
+  CLOSED      // Normal operation
+  OPEN        // Too many failures, blocking requests
+  HALF_OPEN   // Testing if system recovered
+}
+
+enum RetryStrategy {
+  IMMEDIATE   // Retry immediately
+  LINEAR      // Fixed delay between retries
+  EXPONENTIAL // Exponential backoff
+  FIBONACCI   // Fibonacci backoff
+}
+
+enum MetricPeriodType {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum AlertType {
+  HIGH_FAILURE_RATE      // >30% failures in last hour
+  CIRCUIT_BREAKER_OPEN   // Site hit max attempts
+  VERIFICATION_FAILED    // Healing verification failed
+  PATTERN_DEGRADATION    // Pattern success rate dropped
+  SLOW_PERFORMANCE       // Diagnosis/healing taking too long
+  BACKUP_FAILED          // Backup creation failed
+  SYSTEM_ERROR           // Unexpected system error
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  IGNORED
+}
+
+enum AuditAction {
+  DIAGNOSE_SITE
+  APPROVE_HEALING
+  EXECUTE_HEALING
+  ROLLBACK_HEALING
+  RESET_CIRCUIT_BREAKER
+  MODIFY_SITE_CONFIG
+  VIEW_EXECUTION
+  ACKNOWLEDGE_ALERT
+  RESOLVE_ALERT
+  EXECUTE_CUSTOM_COMMAND
+}
+
+enum AuditResourceType {
+  SITE
+  EXECUTION
+  ALERT
+  PATTERN
+  BACKUP
+}

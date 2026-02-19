@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "/home/abdullah/.nvm/versions/node/v24.12.0/bin/node",
+      "args": [
+        "/home/abdullah/.npm/_npx/15b07286cbcc3329/node_modules/@modelcontextprotocol/server-memory/dist/index.js"
+      ],
+      "env": {
+        "MEMORY_FILE_PATH": "/home/abdullah/StudioProjects/final_CP/.kiro/memory/opsmanager-knowledgebase.jsonl"
+      },
+      "autoApprove": [
+        "add_observations",
+        "create_entities",
+        "create_relations",
+        "delete_entities",
+        "delete_observations",
+        "delete_relations",
+        "open_nodes",
+        "read_graph",
+        "search_nodes"
+      ]
+    }
+  }
+}
