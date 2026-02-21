@@ -260,7 +260,7 @@ export class BackupService {
         throw new Error(`Backup ${backupId} is not in COMPLETED status`);
       }
 
-      const site = backup.site;
+      const site = backup.wp_sites;
       const backupData = JSON.parse(backup.backupData);
 
       switch (backup.backupType) {
@@ -354,7 +354,7 @@ export class BackupService {
           // Delete backup file from server
           const deleteCommand = `rm -f ${backup.filePath}`;
           await this.sshService.executeCommand(
-            backup.site.serverId,
+            backup.wp_sites.serverId,
             deleteCommand,
           );
 

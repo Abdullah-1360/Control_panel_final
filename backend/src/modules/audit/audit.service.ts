@@ -27,7 +27,7 @@ export class AuditService {
    */
   async log(data: CreateAuditLogDto): Promise<void> {
     try {
-      await this.prisma.auditLog.create({
+      await this.prisma.audit_logs.create({
         data: {
           userId: data.userId,
           actorType: data.actorType,
@@ -79,13 +79,13 @@ export class AuditService {
     }
 
     const [logs, total] = await Promise.all([
-      this.prisma.auditLog.findMany({
+      this.prisma.audit_logs.findMany({
         where,
         skip,
         take: limit,
         orderBy: { timestamp: 'desc' },
         include: {
-          user: {
+          users: {
             select: {
               id: true,
               email: true,
@@ -96,7 +96,7 @@ export class AuditService {
           },
         },
       }),
-      this.prisma.auditLog.count({ where }),
+      this.prisma.audit_logs.count({ where }),
     ]);
 
     return {
@@ -133,7 +133,7 @@ export class AuditService {
       action: undefined, // Override action filter
     }).then((result) => ({
       ...result,
-      data: result.data.filter((log) =>
+      data: result.data.filter((log: any) =>
         securityActions.some((action) => log.action.includes(action)),
       ),
     }));

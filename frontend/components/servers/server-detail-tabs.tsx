@@ -144,12 +144,12 @@ export function ServerDetailTabs({ serverId }: ServerDetailTabsProps) {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Created By</span>
-                    <p className="font-medium">{server.createdBy.username}</p>
+                    <p className="font-medium">{server.createdBy?.username || 'Unknown'}</p>
                   </div>
                   <div className="col-span-2">
                     <span className="text-muted-foreground">Tags</span>
                     <div className="flex flex-wrap gap-1.5 mt-1">
-                      {server.tags.length > 0 ? (
+                      {server.tags && server.tags.length > 0 ? (
                         server.tags.map((tag) => (
                           <Badge key={tag} variant="outline" className="text-xs">
                             {tag}
@@ -342,7 +342,7 @@ export function ServerDetailTabs({ serverId }: ServerDetailTabsProps) {
                               <div className="text-left">
                                 <p className="text-sm font-medium">{test.message}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {new Date(test.testedAt).toLocaleString()} • {test.latency}ms • by {test.triggeredBy.username}
+                                  {new Date(test.testedAt).toLocaleString()} • {test.latency}ms • by {test.triggeredBy?.username || 'System'}
                                 </p>
                               </div>
                             </div>

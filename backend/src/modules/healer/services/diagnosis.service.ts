@@ -72,6 +72,11 @@ export class DiagnosisService {
         this.checkPHPErrors(serverId, sitePath, commandOutputs),
         this.checkApacheErrors(serverId, commandOutputs, domain), // Pass domain for filtering
         this.checkDiskSpace(serverId, sitePath, commandOutputs),
+        this.checkWebsiteSize(serverId, sitePath, commandOutputs),
+        this.checkEmailSize(serverId, sitePath, commandOutputs),
+        this.checkLogsSize(serverId, sitePath, commandOutputs),
+        this.checkInodes(serverId, sitePath, commandOutputs),
+        this.checkAccountSummary(serverId, sitePath, commandOutputs),
         this.checkPermissions(serverId, sitePath, commandOutputs),
         this.checkHtaccess(serverId, sitePath, commandOutputs),
         this.checkWpConfig(serverId, sitePath, commandOutputs),
@@ -570,7 +575,7 @@ export class DiagnosisService {
   }
 
   /**
-   * Check disk space using cPanel quota command
+   * Check disk space using cPanel quota command (quota-only, no fallback)
    */
   private async checkDiskSpace(
     serverId: string,
@@ -583,95 +588,481 @@ export class DiagnosisService {
       const usernameMatch = sitePath.match(/\/home\/([^\/]+)/);
       const username = usernameMatch ? usernameMatch[1] : null;
       
-      if (username) {
-        // Use cPanel quota command for accurate disk usage
-        const quotaCommand = `quota -u ${username} 2>/dev/null || echo "QUOTA_NOT_AVAILABLE"`;
-        const quotaResult = await this.sshService.executeCommand(serverId, quotaCommand);
+      if (!username) {
+        throw new Error('Could not extract username from path');
+      }
+      
+      // Use cPanel quota command for accurate disk usage
+      const quotaCommand = `quota -u ${username} 2>&1`;
+      const quotaResult = await this.sshService.executeCommand(serverId, quotaCommand);
+      
+      this.logger.debug(`Quota command result for ${username}: ${quotaResult.substring(0, 200)}`);
+      
+      // Check if quota command succeeded
+      if (!quotaResult.includes('/dev/')) {
+        throw new Error(`Quota command failed or returned no data: ${quotaResult.substring(0, 100)}`);
+      }
+      
+      // Parse quota output
+      // Format: Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
+      //         /dev/sda9  239024  15360000 15360000            6732  100000  100000
+      // Note: Output might be on one line or multiple lines
+      const lines = quotaResult.trim().split('\n');
+      
+      // Find the line with the largest usage (usually /dev/sda9 or similar)
+      let maxUsagePercent = 0;
+      let maxUsageBlocks = 0;
+      let maxQuota = 0;
+      let maxAvailable = 0;
+      
+      // Check each line AND also check if /dev/ entries are on the same line as header
+      for (const line of lines) {
+        // Split by /dev/ to handle cases where output is on one line
+        const devEntries = line.split(/(?=\/dev\/)/);
         
-        if (!quotaResult.includes('QUOTA_NOT_AVAILABLE')) {
-          // Parse quota output
-          // Format: Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
-          //         /dev/sda9  239024  15360000 15360000            6732  100000  100000
-          const lines = quotaResult.trim().split('\n');
-          
-          // Find the line with the largest usage (usually /dev/sda9 or similar)
-          let maxUsagePercent = 0;
-          let maxUsageBlocks = 0;
-          let maxQuota = 0;
-          let maxAvailable = 0;
-          
-          for (const line of lines) {
-            if (line.startsWith('/dev/')) {
-              const parts = line.trim().split(/\s+/);
-              const blocks = parseInt(parts[1]) || 0; // Current usage in KB
-              const quota = parseInt(parts[2]) || 0;  // Soft limit in KB
-              const limit = parseInt(parts[3]) || 0;  // Hard limit in KB
-              
-              const effectiveLimit = limit || quota;
-              if (effectiveLimit > 0) {
-                const usagePercent = (blocks / effectiveLimit) * 100;
-                if (usagePercent > maxUsagePercent) {
-                  maxUsagePercent = usagePercent;
-                  maxUsageBlocks = blocks;
-                  maxQuota = effectiveLimit;
-                  maxAvailable = effectiveLimit - blocks;
-                }
+        for (const entry of devEntries) {
+          if (entry.trim().startsWith('/dev/')) {
+            const parts = entry.trim().split(/\s+/);
+            const blocks = parseInt(parts[1]) || 0; // Current usage in KB
+            const quota = parseInt(parts[2]) || 0;  // Soft limit in KB
+            const limit = parseInt(parts[3]) || 0;  // Hard limit in KB
+            
+            const effectiveLimit = limit || quota;
+            if (effectiveLimit > 0) {
+              const usagePercent = (blocks / effectiveLimit) * 100;
+              if (usagePercent > maxUsagePercent) {
+                maxUsagePercent = usagePercent;
+                maxUsageBlocks = blocks;
+                maxQuota = effectiveLimit;
+                maxAvailable = effectiveLimit - blocks;
               }
             }
-          }
-          
-          if (maxQuota > 0) {
-            const usageStr = `${maxUsagePercent.toFixed(1)}%`;
-            const usedMB = (maxUsageBlocks / 1024).toFixed(2);
-            const quotaMB = (maxQuota / 1024).toFixed(2);
-            const availableMB = (maxAvailable / 1024).toFixed(2);
-            const critical = maxUsagePercent > 90;
-            
-            commandOutputs.push({
-              command: 'Disk Space Check (quota)',
-              output: `Used: ${usedMB} MB / ${quotaMB} MB (${usageStr})\nAvailable: ${availableMB} MB`,
-              success: !critical,
-              duration: Date.now() - startTime,
-            });
-            
-            return { 
-              available: `${availableMB} MB`, 
-              usage: usageStr, 
-              critical 
-            };
           }
         }
       }
       
-      // Fallback to df command if quota not available
-      const result = await this.sshService.executeCommand(
-        serverId,
-        `df -h ${sitePath} | tail -1`,
-      );
+      if (maxQuota === 0) {
+        throw new Error('No valid quota data found in output');
+      }
       
-      const parts = result.trim().split(/\s+/);
-      const usage = parts[4] || '0%';
-      const available = parts[3] || 'Unknown';
-      const usagePercent = parseInt(usage.replace('%', ''));
-      const critical = usagePercent > 90;
+      const usageStr = `${maxUsagePercent.toFixed(1)}%`;
+      const usedMB = (maxUsageBlocks / 1024).toFixed(2);
+      const quotaMB = (maxQuota / 1024).toFixed(2);
+      const availableMB = (maxAvailable / 1024).toFixed(2);
+      const critical = maxUsagePercent > 90;
+      
+      this.logger.debug(`Using quota data: ${usedMB}MB / ${quotaMB}MB (${usageStr})`);
       
       commandOutputs.push({
-        command: 'Disk Space Check (df)',
-        output: `Usage: ${usage}, Available: ${available}`,
+        command: 'Disk Space Check (quota)',
+        output: `Used: ${usedMB} MB / ${quotaMB} MB (${usageStr})\nAvailable: ${availableMB} MB`,
         success: !critical,
         duration: Date.now() - startTime,
       });
       
-      return { available, usage, critical };
+      return { 
+        available: `${availableMB} MB`, 
+        usage: usageStr, 
+        critical 
+      };
     } catch (error) {
       const err = error as Error;
+      this.logger.error(`Disk space check failed: ${err.message}`);
       commandOutputs.push({
-        command: 'Disk Space Check',
-        output: err.message,
+        command: 'Disk Space Check (quota)',
+        output: `Failed: ${err.message}`,
         success: false,
         duration: Date.now() - startTime,
       });
       return { available: 'Unknown', usage: '0%', critical: false };
+    }
+  }
+
+  /**
+   * Check website size using du command
+   */
+  private async checkWebsiteSize(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<void> {
+    const startTime = Date.now();
+    try {
+      // Use du -sh to get human-readable size
+      const command = `du -sh ${sitePath} 2>&1 | awk '{print $1}'`;
+      const result = await this.sshService.executeCommand(serverId, command);
+      
+      const size = result.trim();
+      
+      // Parse size to check if it's too large (e.g., > 5GB)
+      let sizeInMB = 0;
+      let warning = false;
+      
+      if (size.includes('G')) {
+        sizeInMB = parseFloat(size.replace('G', '')) * 1024;
+        warning = sizeInMB > 5120; // Warn if > 5GB
+      } else if (size.includes('M')) {
+        sizeInMB = parseFloat(size.replace('M', ''));
+        warning = sizeInMB > 5120;
+      } else if (size.includes('K')) {
+        sizeInMB = parseFloat(size.replace('K', '')) / 1024;
+      }
+      
+      this.logger.debug(`Website size for ${sitePath}: ${size} (${sizeInMB.toFixed(2)} MB)`);
+      
+      commandOutputs.push({
+        command: 'Website Size Check (du)',
+        output: `Total size: ${size}${warning ? ' (Warning: Large website size may affect performance)' : ''}`,
+        success: !warning,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Website size check failed: ${err.message}`);
+      commandOutputs.push({
+        command: 'Website Size Check (du)',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+    }
+  }
+
+  /**
+   * Check email directory size
+   */
+  private async checkEmailSize(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<void> {
+    const startTime = Date.now();
+    try {
+      // Extract username from path
+      const usernameMatch = sitePath.match(/\/home\/([^\/]+)/);
+      const username = usernameMatch ? usernameMatch[1] : null;
+      
+      if (!username) {
+        throw new Error('Could not extract username from path');
+      }
+      
+      // Check email directory size
+      const mailPath = `/home/${username}/mail`;
+      const command = `du -sh ${mailPath} 2>&1 | awk '{print $1}'`;
+      const result = await this.sshService.executeCommand(serverId, command);
+      
+      const size = result.trim();
+      
+      // Parse size to check if it's too large (e.g., > 2GB)
+      let sizeInMB = 0;
+      let warning = false;
+      
+      if (size.includes('G')) {
+        sizeInMB = parseFloat(size.replace('G', '')) * 1024;
+        warning = sizeInMB > 2048; // Warn if > 2GB
+      } else if (size.includes('M')) {
+        sizeInMB = parseFloat(size.replace('M', ''));
+        warning = sizeInMB > 2048;
+      } else if (size.includes('K')) {
+        sizeInMB = parseFloat(size.replace('K', '')) / 1024;
+      }
+      
+      this.logger.debug(`Email size for ${username}: ${size} (${sizeInMB.toFixed(2)} MB)`);
+      
+      commandOutputs.push({
+        command: 'Email Directory Size (du)',
+        output: `Total email size: ${size}${warning ? ' (Warning: Large email storage may consume disk space)' : ''}`,
+        success: !warning,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Email size check failed: ${err.message}`);
+      commandOutputs.push({
+        command: 'Email Directory Size (du)',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+    }
+  }
+
+  /**
+   * Check logs directory size
+   */
+  private async checkLogsSize(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<void> {
+    const startTime = Date.now();
+    try {
+      // Extract username from path
+      const usernameMatch = sitePath.match(/\/home\/([^\/]+)/);
+      const username = usernameMatch ? usernameMatch[1] : null;
+      
+      if (!username) {
+        throw new Error('Could not extract username from path');
+      }
+      
+      // Check logs directory size
+      const logsPath = `/home/${username}/logs`;
+      const command = `du -sh ${logsPath} 2>&1 | awk '{print $1}'`;
+      const result = await this.sshService.executeCommand(serverId, command);
+      
+      const size = result.trim();
+      
+      // Parse size to check if it's too large (e.g., > 1GB)
+      let sizeInMB = 0;
+      let warning = false;
+      let critical = false;
+      
+      if (size.includes('G')) {
+        sizeInMB = parseFloat(size.replace('G', '')) * 1024;
+        critical = sizeInMB > 2048; // Critical if > 2GB
+        warning = sizeInMB > 1024 && !critical; // Warning if > 1GB
+      } else if (size.includes('M')) {
+        sizeInMB = parseFloat(size.replace('M', ''));
+        critical = sizeInMB > 2048;
+        warning = sizeInMB > 1024 && !critical;
+      } else if (size.includes('K')) {
+        sizeInMB = parseFloat(size.replace('K', '')) / 1024;
+      }
+      
+      this.logger.debug(`Logs size for ${username}: ${size} (${sizeInMB.toFixed(2)} MB)`);
+      
+      let output = `Total logs size: ${size}`;
+      
+      if (critical) {
+        output += '\n\n❌ CRITICAL: Logs directory is very large (>2GB). Consider log rotation or cleanup.';
+      } else if (warning) {
+        output += '\n\n⚠️ WARNING: Logs directory is large (>1GB). Monitor and consider cleanup.';
+      }
+      
+      commandOutputs.push({
+        command: 'Logs Directory Size (du)',
+        output,
+        success: !critical,
+        duration: Date.now() - startTime,
+      });
+    } catch (err) {
+      const error = err as Error;
+      this.logger.error(`Logs size check failed: ${error.message}`);
+      commandOutputs.push({
+        command: 'Logs Directory Size (du)',
+        output: `Failed: ${error.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+    }
+  }
+
+  /**
+   * Check inodes usage
+   */
+  private async checkInodes(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<void> {
+    const startTime = Date.now();
+    try {
+      // Extract username from path
+      const usernameMatch = sitePath.match(/\/home\/([^\/]+)/);
+      const username = usernameMatch ? usernameMatch[1] : null;
+      
+      if (!username) {
+        throw new Error('Could not extract username from path');
+      }
+      
+      const homePath = `/home/${username}`;
+      
+      // Check inodes usage
+      const command = `df -i ${homePath} 2>&1 | tail -1`;
+      const result = await this.sshService.executeCommand(serverId, command);
+      
+      const parts = result.trim().split(/\s+/);
+      const inodesUsed = parts[2] || '0';
+      const inodesTotal = parts[1] || '0';
+      const inodesPercent = parts[4] || '0%';
+      const usagePercent = parseInt(inodesPercent.replace('%', ''));
+      
+      const critical = usagePercent > 80;
+      const warning = usagePercent > 60;
+      
+      this.logger.debug(`Inodes for ${username}: ${inodesUsed}/${inodesTotal} (${inodesPercent})`);
+      
+      let output = `Inodes used: ${inodesUsed} / ${inodesTotal} (${inodesPercent})`;
+      
+      // If usage is high, get top 20 directories consuming inodes
+      if (critical || warning) {
+        try {
+          const topDirsCommand = `du -h ${homePath} 2>/dev/null | sort -hr | head -20`;
+          const topDirs = await this.sshService.executeCommand(serverId, topDirsCommand, 30000);
+          output += `\n\nTop 20 directories by size:\n${topDirs.trim()}`;
+        } catch (err) {
+          const error = err as Error;
+          this.logger.warn(`Failed to get top directories: ${error.message}`);
+        }
+      }
+      
+      if (critical) {
+        output += '\n\n⚠️ CRITICAL: Inodes usage is very high! This may prevent file creation.';
+      } else if (warning) {
+        output += '\n\n⚠️ WARNING: Inodes usage is elevated. Monitor closely.';
+      }
+      
+      commandOutputs.push({
+        command: 'Inodes Usage Check (df -i)',
+        output,
+        success: !critical,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Inodes check failed: ${err.message}`);
+      commandOutputs.push({
+        command: 'Inodes Usage Check (df -i)',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+    }
+  }
+
+  /**
+   * Check cPanel account summary for issues
+   */
+  private async checkAccountSummary(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<void> {
+    const startTime = Date.now();
+    try {
+      // Extract username from path
+      const usernameMatch = sitePath.match(/\/home\/([^\/]+)/);
+      const username = usernameMatch ? usernameMatch[1] : null;
+      
+      if (!username) {
+        throw new Error('Could not extract username from path');
+      }
+      
+      // Get account summary using WHM API
+      const command = `whmapi1 accountsummary user=${username} 2>&1`;
+      const result = await this.sshService.executeCommand(serverId, command);
+      
+      this.logger.debug(`Account summary for ${username}: ${result.substring(0, 300)}`);
+      
+      // Parse YAML-like output
+      const lines = result.split('\n');
+      const accountData: any = {};
+      
+      for (const line of lines) {
+        const match = line.match(/^\s*([^:]+):\s*(.+)$/);
+        if (match) {
+          const key = match[1].trim();
+          const value = match[2].trim();
+          accountData[key] = value;
+        }
+      }
+      
+      // Check for issues
+      const issues: string[] = [];
+      const warnings: string[] = [];
+      
+      // Check if account is suspended
+      if (accountData.suspended === '1') {
+        issues.push(`❌ Account is SUSPENDED: ${accountData.suspendreason || 'Unknown reason'}`);
+      }
+      
+      // Check if account is locked
+      if (accountData.is_locked === '1') {
+        issues.push('❌ Account is LOCKED');
+      }
+      
+      // Check outgoing mail status
+      if (accountData.outgoing_mail_suspended === '1') {
+        issues.push('❌ Outgoing mail is SUSPENDED');
+      }
+      
+      if (accountData.outgoing_mail_hold === '1') {
+        warnings.push('⚠️ Outgoing mail is on HOLD');
+      }
+      
+      // Check disk usage
+      const diskUsed = accountData.diskused || '0M';
+      const diskLimit = accountData.disklimit || '0M';
+      const diskUsedMB = parseFloat(diskUsed.replace('M', ''));
+      const diskLimitMB = parseFloat(diskLimit.replace('M', ''));
+      
+      if (diskLimitMB > 0) {
+        const diskPercent = (diskUsedMB / diskLimitMB) * 100;
+        if (diskPercent > 95) {
+          issues.push(`❌ Disk usage critical: ${diskUsedMB}MB / ${diskLimitMB}MB (${diskPercent.toFixed(1)}%)`);
+        } else if (diskPercent > 85) {
+          warnings.push(`⚠️ Disk usage high: ${diskUsedMB}MB / ${diskLimitMB}MB (${diskPercent.toFixed(1)}%)`);
+        }
+      }
+      
+      // Check inodes usage
+      const inodesUsed = parseInt(accountData.inodesused || '0');
+      const inodesLimit = parseInt(accountData.inodeslimit || '0');
+      
+      if (inodesLimit > 0) {
+        const inodesPercent = (inodesUsed / inodesLimit) * 100;
+        if (inodesPercent > 95) {
+          issues.push(`❌ Inodes critical: ${inodesUsed} / ${inodesLimit} (${inodesPercent.toFixed(1)}%)`);
+        } else if (inodesPercent > 85) {
+          warnings.push(`⚠️ Inodes high: ${inodesUsed} / ${inodesLimit} (${inodesPercent.toFixed(1)}%)`);
+        }
+      }
+      
+      // Check email limits
+      const maxEmailPerHour = parseInt(accountData.max_email_per_hour || '0');
+      if (maxEmailPerHour > 0 && maxEmailPerHour < 50) {
+        warnings.push(`⚠️ Email limit is low: ${maxEmailPerHour} emails/hour`);
+      }
+      
+      // Build output
+      let output = `Account: ${username}\n`;
+      output += `Domain: ${accountData.domain || 'Unknown'}\n`;
+      output += `Plan: ${accountData.plan || 'Unknown'}\n`;
+      output += `Owner: ${accountData.owner || 'Unknown'}\n`;
+      output += `Status: ${accountData.suspended === '1' ? 'SUSPENDED' : 'Active'}\n`;
+      output += `Disk: ${diskUsed} / ${diskLimit}\n`;
+      output += `Inodes: ${inodesUsed} / ${inodesLimit}\n`;
+      output += `Email Limit: ${maxEmailPerHour} per hour\n`;
+      
+      if (issues.length > 0) {
+        output += `\n🚨 CRITICAL ISSUES:\n${issues.join('\n')}`;
+      }
+      
+      if (warnings.length > 0) {
+        output += `\n\n⚠️ WARNINGS:\n${warnings.join('\n')}`;
+      }
+      
+      if (issues.length === 0 && warnings.length === 0) {
+        output += '\n\n✅ No issues detected';
+      }
+      
+      const hasIssues = issues.length > 0;
+      
+      commandOutputs.push({
+        command: 'cPanel Account Summary (whmapi1)',
+        output,
+        success: !hasIssues,
+        duration: Date.now() - startTime,
+      });
+    } catch (err) {
+      const error = err as Error;
+      this.logger.error(`Account summary check failed: ${error.message}`);
+      commandOutputs.push({
+        command: 'cPanel Account Summary (whmapi1)',
+        output: `Failed: ${error.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
     }
   }
 

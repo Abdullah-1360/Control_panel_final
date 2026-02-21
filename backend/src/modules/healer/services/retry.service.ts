@@ -35,7 +35,7 @@ export class RetryService {
       };
     }
 
-    const site = execution.site;
+    const site = execution.wp_sites;
 
     // Check circuit breaker
     if (site.circuitBreakerState === 'OPEN') {

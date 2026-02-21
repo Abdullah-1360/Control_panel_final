@@ -315,7 +315,7 @@ export class WebhookService {
     const event = await this.prisma.webhook_events.findUnique({
       where: { id: eventId },
       include: {
-        integration: {
+        integrations: {
           select: {
             id: true,
             name: true,

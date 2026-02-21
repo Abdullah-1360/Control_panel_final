@@ -110,7 +110,7 @@ export class ManualDiagnosisService {
       throw new Error(`Session ${sessionId} is not active`);
     }
 
-    const site = session.site;
+    const site = session.wp_sites;
     const startTime = Date.now();
 
     try {
@@ -125,7 +125,7 @@ export class ManualDiagnosisService {
 
       // Execute command via SSH
       const output = await this.sshExecutor.executeCommand(
-        site.server.id,
+        site.servers.id,
         fullCommand,
       );
 
@@ -210,7 +210,7 @@ export class ManualDiagnosisService {
     const analysis = this.analyzeOutput(lastCommand, lastOutput);
 
     // Get learned patterns
-    const patterns = await this.getRelevantPatterns(session.site, analysis);
+    const patterns = await this.getRelevantPatterns(session.wp_sites, analysis);
 
     // Add pattern-based suggestions (top 3)
     for (const pattern of patterns.slice(0, 3)) {
@@ -232,7 +232,7 @@ export class ManualDiagnosisService {
 
     // Add rule-based suggestions if no patterns found
     if (suggestions.length === 0) {
-      suggestions.push(...this.getRuleBasedSuggestions(lastCommand, lastOutput, session.site));
+      suggestions.push(...this.getRuleBasedSuggestions(lastCommand, lastOutput, session.wp_sites));
     }
 
     return suggestions;
@@ -658,9 +658,9 @@ export class ManualDiagnosisService {
     const session = await this.prisma.manual_diagnosis_sessions.findUnique({
       where: { id: sessionId },
       include: {
-        site: {
+        wp_sites: {
           include: {
-            server: {
+            servers: {
               select: {
                 id: true,
                 host: true,

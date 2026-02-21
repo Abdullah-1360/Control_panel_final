@@ -508,6 +508,8 @@ export class SiteDiscoveryService {
     sites: DiscoveredSite[],
   ): Promise<number> {
     let registered = 0;
+    let updated = 0;
+    let failed = 0;
 
     for (const site of sites) {
       try {
@@ -517,17 +519,21 @@ export class SiteDiscoveryService {
         });
 
         if (existing) {
-          // Update existing site
+          // Update existing site (including serverId in case it moved)
           await this.prisma.wp_sites.update({
             where: { id: existing.id },
             data: {
+              serverId, // Update serverId in case site moved to different server
               wpVersion: site.wpVersion,
               phpVersion: site.phpVersion,
               dbName: site.dbName,
               dbHost: site.dbHost,
+              cPanelUsername: site.cPanelUsername, // Update cPanel username too
+              path: site.path, // Update path in case it changed
               updatedAt: new Date(),
             },
           });
+          updated++;
         } else {
           // Create new site
           await this.prisma.wp_sites.create({
@@ -551,8 +557,13 @@ export class SiteDiscoveryService {
         this.logger.error(
           `Failed to register site ${site.domain}: ${err.message}`,
         );
+        failed++;
       }
     }
+
+    this.logger.log(
+      `Site registration complete: ${registered} new, ${updated} updated, ${failed} failed`,
+    );
 
     return registered;
   }
@@ -568,12 +579,12 @@ export class SiteDiscoveryService {
           mode: 'insensitive',
         },
         // Filter out sites whose servers have been soft-deleted
-        server: {
+        servers: {
           deletedAt: null,
         },
       },
       include: {
-        server: {
+        servers: {
           select: {
             id: true,
             host: true,

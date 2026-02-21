@@ -107,7 +107,7 @@ export class BackupStatusService implements IDiagnosisCheckService {
       // Check our healer backups
       const backup = await this.prisma.healer_backups.findFirst({
         where: {
-          site: {
+          wp_sites: {
             serverId,
             path: sitePath,
           },

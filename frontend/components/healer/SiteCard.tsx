@@ -67,7 +67,7 @@ export function SiteCard({ site, onDiagnose, isMainDomain, subdomainCount }: Sit
       <CardContent className="space-y-2 text-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Server className="h-4 w-4" />
-          <span className="truncate">{site.server.host}</span>
+          <span className="truncate">{site.server?.host || site.servers?.host || 'Unknown'}</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2">

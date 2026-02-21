@@ -336,7 +336,7 @@ function UserMenu({ user, initials, displayName, onLogout }: UserMenuProps) {
             <span className="text-xs font-medium">{displayName}</span>
             <span className="text-[11px] text-muted-foreground font-normal">{user.email}</span>
             <span className="text-[10px] text-muted-foreground/70 font-normal mt-0.5">
-              {user.role.displayName}
+              {user.role?.displayName || user.role?.name || 'User'}
             </span>
           </div>
         </DropdownMenuLabel>

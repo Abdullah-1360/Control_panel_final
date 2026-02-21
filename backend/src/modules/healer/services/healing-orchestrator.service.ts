@@ -164,7 +164,7 @@ export class HealingOrchestratorService {
         throw new Error(`Execution ${executionId} is not in DIAGNOSED status`);
       }
 
-      const site = execution.site;
+      const site = execution.wp_sites;
 
       // Check circuit breaker (skip if custom commands provided - that IS manual intervention)
       if (!customCommands || customCommands.length === 0) {
@@ -241,19 +241,19 @@ export class HealingOrchestratorService {
     try {
       const execution = await this.prisma.healer_executions.findUnique({
         where: { id: executionId },
-        include: { backup: true },
+        include: { healer_backups: true },
       });
 
       if (!execution) {
         throw new Error(`Execution ${executionId} not found`);
       }
 
-      if (!execution.backup) {
+      if (!execution.healer_backups) {
         throw new Error(`No backup found for execution ${executionId}`);
       }
 
       // Restore from backup
-      await this.backupService.restore(execution.backup.id);
+      await this.backupService.restore(execution.healer_backups.id);
 
       // Update execution status
       await this.prisma.healer_executions.update({
@@ -347,9 +347,9 @@ export class HealingOrchestratorService {
     const execution = await this.prisma.healer_executions.findUnique({
       where: { id: executionId },
       include: {
-        site: {
+        wp_sites: {
           include: {
-            server: {
+            servers: {
               select: {
                 id: true,
                 host: true,
@@ -357,7 +357,7 @@ export class HealingOrchestratorService {
             },
           },
         },
-        backup: true,
+        healer_backups: true,
       },
     });
 

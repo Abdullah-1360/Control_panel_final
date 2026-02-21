@@ -13,7 +13,7 @@ interface User {
   username: string;
   firstName: string | null;
   lastName: string | null;
-  role: {
+  role?: {
     id: string;
     name: string;
     displayName: string;

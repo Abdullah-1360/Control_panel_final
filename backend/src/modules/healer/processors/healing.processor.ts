@@ -53,7 +53,7 @@ export class HealingProcessor {
         throw new Error(`Execution ${executionId} not found`);
       }
 
-      const site = execution.site;
+      const site = execution.wp_sites;
 
       // Determine the correct path to use for healing
       const diagnosisDetails = JSON.parse(execution.diagnosisDetails);

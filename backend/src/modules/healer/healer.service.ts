@@ -29,7 +29,7 @@ export class HealerService {
       discoveredSites,
     );
     
-    this.logger.log(`Registered ${registeredCount} sites in database`);
+    this.logger.log(`Discovery complete: ${discoveredSites.length} sites found, ${registeredCount} new sites registered`);
     
     // Return the list of sites from database
     return this.listSites({ serverId });
@@ -72,7 +72,7 @@ export class HealerService {
     }
 
     // Filter out sites whose servers have been soft-deleted
-    where.server = {
+    where.servers = {
       deletedAt: null,
     };
 
@@ -94,8 +94,14 @@ export class HealerService {
       this.prisma.wp_sites.count({ where }),
     ]);
 
+    // Map servers to server for frontend compatibility
+    const sitesWithMappedRelation = sites.map((site: any) => ({
+      ...site,
+      server: site.servers,
+    }));
+
     return {
-      data: sites,
+      data: sitesWithMappedRelation,
       pagination: {
         total,
         page,
@@ -112,7 +118,7 @@ export class HealerService {
     const site = await this.prisma.wp_sites.findUnique({
       where: { id: siteId },
       include: {
-        server: true,
+        servers: true,
       },
     });
 
@@ -121,11 +127,15 @@ export class HealerService {
     }
 
     // Check if the server has been soft-deleted
-    if (site.server.deletedAt) {
+    if (site.servers.deletedAt) {
       throw new Error(`Site ${siteId} not found (server deleted)`);
     }
 
-    return site;
+    // Map servers to server for frontend compatibility
+    return {
+      ...site,
+      server: site.servers,
+    };
   }
 
   /**

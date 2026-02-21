@@ -926,6 +926,7 @@ export class ServersService {
       encryptedPassphrase,
       encryptedPassword,
       encryptedSudoPassword,
+      users,
       ...sanitized
     } = server;
 
@@ -936,6 +937,7 @@ export class ServersService {
       hasPassphrase: !!encryptedPassphrase,
       hasPassword: !!encryptedPassword,
       hasSudoPassword: !!encryptedSudoPassword,
+      createdBy: users, // Map users relation to createdBy for frontend compatibility
     };
   }
 }

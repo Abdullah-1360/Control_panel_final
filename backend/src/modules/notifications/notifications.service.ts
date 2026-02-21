@@ -208,7 +208,7 @@ export class NotificationsService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          rule: {
+          notification_rules: {
             select: {
               id: true,
               name: true,

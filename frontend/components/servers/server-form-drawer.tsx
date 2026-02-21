@@ -76,7 +76,7 @@ const serverFormSchema = z.object({
     },
     "Must be a valid IP address or hostname"
   ),
-  port: z.coerce.number().min(1).max(65535),
+  port: z.coerce.number().int().min(1, "Port must be at least 1").max(65535, "Port must be at most 65535"),
   connectionProtocol: z.string().default("SSH"),
   username: z.string().min(1, "Username is required"),
   
@@ -104,8 +104,14 @@ const serverFormSchema = z.object({
   alertCpuThreshold: z.coerce.number().min(1).max(100).optional(),
   alertRamThreshold: z.coerce.number().min(1).max(100).optional(),
   alertDiskThreshold: z.coerce.number().min(1).max(100).optional(),
+  isEditMode: z.boolean().optional(), // Add flag to track edit mode
 }).refine((data) => {
-  // Validate auth type requirements
+  // Skip credential validation in edit mode (credentials are optional when updating)
+  if (data.isEditMode) {
+    return true;
+  }
+  
+  // Validate auth type requirements only in create mode
   if (data.authType === "SSH_KEY" && !data.privateKey) {
     return false
   }
@@ -179,6 +185,7 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
       alertCpuThreshold: 90,
       alertRamThreshold: 95,
       alertDiskThreshold: 90,
+      isEditMode: false, // Default to create mode
     },
   })
 
@@ -192,7 +199,7 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
         notes: serverData.notes || "",
         platformType: serverData.platformType,
         host: serverData.host,
-        port: serverData.port,
+        port: Number(serverData.port) || 22, // Ensure port is a number
         connectionProtocol: serverData.connectionProtocol,
         username: serverData.username,
         authType: serverData.authType,
@@ -212,9 +219,38 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
         alertCpuThreshold: serverData.alertCpuThreshold || 90,
         alertRamThreshold: serverData.alertRamThreshold || 95,
         alertDiskThreshold: serverData.alertDiskThreshold || 90,
+        isEditMode: true, // Set edit mode flag
+      })
+    } else if (!isEditMode && open) {
+      // Reset to default values when opening in create mode
+      form.reset({
+        name: "",
+        environment: "",
+        tags: [],
+        notes: "",
+        platformType: "LINUX",
+        host: "",
+        port: 22,
+        connectionProtocol: "SSH",
+        username: "root",
+        authType: "SSH_KEY",
+        privateKey: "",
+        passphrase: "",
+        password: "",
+        privilegeMode: "ROOT",
+        sudoMode: "NONE",
+        sudoPassword: "",
+        hostKeyStrategy: "TOFU",
+        knownHostFingerprints: [],
+        metricsEnabled: false,
+        metricsInterval: 900,
+        alertCpuThreshold: 90,
+        alertRamThreshold: 95,
+        alertDiskThreshold: 90,
+        isEditMode: false,
       })
     }
-  }, [isEditMode, serverData, form])
+  }, [isEditMode, serverData, open, form])
 
   const toggleSection = (section: keyof typeof openSections) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }))
@@ -252,6 +288,8 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
     setSuccessMessage(null)
     
     try {
+      console.log('[ServerForm] Submitting with values:', { ...values, privateKey: values.privateKey ? '[REDACTED]' : undefined, password: values.password ? '[REDACTED]' : undefined });
+      
       const credentials: any = {}
       let hasCredentials = false;
       
@@ -305,7 +343,9 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
           updatePayload.credentials = credentials;
         }
 
+        console.log('[ServerForm] Update payload:', { ...updatePayload, credentials: hasCredentials ? '[REDACTED]' : undefined });
         const result = await updateMutation.mutateAsync({ id: serverId!, data: updatePayload })
+        console.log('[ServerForm] Update successful:', result);
         setSuccessMessage(`Server "${values.name}" updated successfully!`)
         if (onSuccess) onSuccess(result)
       } else {
@@ -334,12 +374,15 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
           alertDiskThreshold: values.alertDiskThreshold,
         };
 
+        console.log('[ServerForm] Create payload:', { ...createPayload, credentials: '[REDACTED]' });
         const result = await createMutation.mutateAsync(createPayload)
+        console.log('[ServerForm] Create successful:', result);
         setSuccessMessage(`Server "${values.name}" created successfully!`)
         if (onSuccess) onSuccess(result)
         form.reset()
       }
     } catch (error: any) {
+      console.error('[ServerForm] Submit error:', error);
       toast.error(error.message || "Failed to save server")
     }
   }
@@ -566,7 +609,15 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
                         <FormItem className="col-span-2 sm:col-span-1">
                           <FormLabel>Port *</FormLabel>
                           <FormControl>
-                            <Input type="number" placeholder="22" {...field} />
+                            <Input 
+                              type="number" 
+                              placeholder="22" 
+                              {...field}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                field.onChange(value === '' ? '' : Number(value));
+                              }}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1199,6 +1250,11 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
             Cancel
           </Button>
           <div className="flex items-center gap-2">
+            {Object.keys(form.formState.errors).length > 0 && (
+              <span className="text-xs text-destructive">
+                Please fix {Object.keys(form.formState.errors).length} validation error(s)
+              </span>
+            )}
             {successMessage && (
               <Button type="button" variant="outline" size="sm">
                 <ExternalLink className="h-4 w-4 mr-2" />

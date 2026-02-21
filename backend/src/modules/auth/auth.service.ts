@@ -52,7 +52,7 @@ export class AuthService {
       const user = await this.prisma.users.findUnique({
         where: { email },
         include: {
-          role: {
+          roles: {
             include: {
               permissions: true,
             },
@@ -262,9 +262,9 @@ export class AuthService {
           firstName: user.firstName,
           lastName: user.lastName,
           role: {
-            id: user.role.id,
-            name: user.role.name,
-            displayName: user.role.displayName,
+            id: user.roles.id,
+            name: user.roles.name,
+            displayName: user.roles.displayName,
           },
           mfaEnabled: user.mfaEnabled,
           mustChangePassword: user.mustChangePassword,
@@ -323,7 +323,7 @@ export class AuthService {
       const user = await this.prisma.users.findUnique({
         where: { id: session.userId },
         include: {
-          role: {
+          roles: {
             include: {
               permissions: true,
             },
@@ -379,9 +379,9 @@ export class AuthService {
     accessToken: string;
     refreshToken: string;
   }> {
-    const permissions = user.role.permissions.map(
+    const permissions = user.roles?.permissions?.map(
       (p: any) => `${p.resource}.${p.action}`,
-    );
+    ) || [];
 
     const payload: JwtPayload = {
       sub: user.id,
@@ -575,7 +575,7 @@ export class AuthService {
       include: { users: true },
     });
 
-    if (!resetToken || resetToken.used || !resetToken.user) {
+    if (!resetToken || resetToken.used || !resetToken.users) {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
@@ -583,7 +583,7 @@ export class AuthService {
       throw new BadRequestException('Reset token has expired');
     }
 
-    const user = resetToken.user;
+    const user = resetToken.users;
 
     // Hash new password
     const newHash = await this.passwordService.hashPassword(newPassword);
@@ -847,7 +847,7 @@ export class AuthService {
         lastName: true,
         mfaEnabled: true,
         mustChangePassword: true,
-        role: {
+        roles: {
           select: {
             id: true,
             name: true,

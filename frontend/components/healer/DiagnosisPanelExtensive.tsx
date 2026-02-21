@@ -208,9 +208,9 @@ export function DiagnosisPanelExtensive({
                       </div>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                      <div className="px-3 pb-3">
-                        <div className="bg-muted rounded-md p-3 mt-2">
-                          <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words">
+                      <div className="px-3 pb-3 max-w-full overflow-hidden">
+                        <div className="bg-muted rounded-md p-3 mt-2 max-w-full overflow-hidden">
+                          <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words max-w-full">
                             {cmd.output}
                           </pre>
                         </div>
