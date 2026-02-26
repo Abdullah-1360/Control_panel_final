@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from '../services/ssh-executor.service';
+import { SSHExecutorService } from '../services/ssh-executor.service';
 
 interface HealingContext {
   site: any;
@@ -17,7 +17,7 @@ interface HealingResult {
 export class MaintenanceHealerRunbook {
   private readonly logger = new Logger(MaintenanceHealerRunbook.name);
 
-  constructor(private readonly sshService: SshExecutorService) {}
+  constructor(private readonly sshService: SSHExecutorService) {}
 
   /**
    * Execute maintenance mode healing

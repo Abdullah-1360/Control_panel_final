@@ -10,7 +10,7 @@ import { UnifiedDiagnosisService } from './services/unified-diagnosis.service';
 import { HealingOrchestratorService } from './services/healing-orchestrator.service';
 import { BackupService } from './services/backup.service';
 import { WpCliService } from './services/wp-cli.service';
-import { SshExecutorService } from './services/ssh-executor.service';
+import { SSHExecutorService } from './services/ssh-executor.service';
 import { PatternLearningService } from './services/pattern-learning.service';
 import { ManualDiagnosisService } from './services/manual-diagnosis.service';
 import { HealingProcessor } from './processors/healing.processor';
@@ -56,7 +56,7 @@ import { UptimeMonitoringService } from './services/checks/uptime-monitoring.ser
     HealingOrchestratorService,
     BackupService,
     WpCliService,
-    SshExecutorService, // Real SSH executor using Module 2
+    SSHExecutorService, // Real SSH executor using Module 2
     PatternLearningService, // Self-learning automation
     ManualDiagnosisService, // Manual diagnosis with learning
     HealingProcessor,

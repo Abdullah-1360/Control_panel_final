@@ -93,12 +93,12 @@ export class HealingStrategyEngineService {
         // Never auto-heal in manual mode
         return false;
         
-      case HealingMode.SUPERVISED:
-        // Only auto-heal LOW risk actions
+      case HealingMode.SEMI_AUTO:
+        // Only auto-heal LOW risk actions (SUPERVISED mode)
         return riskLevel === RiskLevel.LOW;
         
-      case HealingMode.AUTO:
-        // Auto-heal LOW and MEDIUM risk actions
+      case HealingMode.FULL_AUTO:
+        // Auto-heal LOW and MEDIUM risk actions (AUTO mode)
         return riskLevel === RiskLevel.LOW || riskLevel === RiskLevel.MEDIUM;
         
       default:
@@ -115,7 +115,7 @@ export class HealingStrategyEngineService {
     warnings: string[];
   } {
     const errors: string[] = [];
-    const warnings: string[];
+    const warnings: string[] = [];
     
     // Check for conflicting actions
     const actionNames = new Set<string>();

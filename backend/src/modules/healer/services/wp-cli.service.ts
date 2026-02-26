@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 
 @Injectable()
 export class WpCliService {
@@ -17,7 +17,7 @@ export class WpCliService {
     'option',
   ];
 
-  constructor(private readonly sshService: SshExecutorService) {}
+  constructor(private readonly sshService: SSHExecutorService) {}
 
   /**
    * Execute wp-cli command

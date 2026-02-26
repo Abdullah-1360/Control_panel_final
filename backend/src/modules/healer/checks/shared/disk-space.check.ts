@@ -30,7 +30,7 @@ export class DiskSpaceCheck extends DiagnosticCheckBase {
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
       // Get disk usage using SSH executor
-      const usage = await this.sshExecutor.getDiskUsage(server, application.path);
+      const usage = await this.sshExecutor.getDiskUsage(server.id, application.path);
       
       if (usage === null) {
         return this.error(
@@ -65,7 +65,7 @@ export class DiskSpaceCheck extends DiagnosticCheckBase {
       
       return this.pass(`Disk usage healthy at ${usage}%`, { usage });
       
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Disk space check failed: ${error.message}`);
       return this.error(
         `Failed to check disk space: ${error.message}`,

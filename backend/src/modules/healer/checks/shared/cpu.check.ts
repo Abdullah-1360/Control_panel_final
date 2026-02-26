@@ -29,7 +29,7 @@ export class CpuCheck extends DiagnosticCheckBase {
   
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
-      const cpuUsage = await this.sshExecutor.getCPUUsage(server);
+      const cpuUsage = await this.sshExecutor.getCPUUsage(server.id);
       
       if (cpuUsage === null) {
         return this.error(
@@ -59,7 +59,7 @@ export class CpuCheck extends DiagnosticCheckBase {
         { usage: cpuUsage },
       );
       
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`CPU check failed: ${error.message}`);
       return this.error(
         `Failed to check CPU usage: ${error.message}`,

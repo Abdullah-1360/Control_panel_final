@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WpCliService } from '../services/wp-cli.service';
-import { SshExecutorService } from '../services/ssh-executor.service';
+import { SSHExecutorService } from '../services/ssh-executor.service';
 
 interface HealingContext {
   site: any;
@@ -21,7 +21,7 @@ export class WsodHealerRunbook {
 
   constructor(
     private readonly wpCliService: WpCliService,
-    private readonly sshService: SshExecutorService,
+    private readonly sshService: SSHExecutorService,
   ) {}
 
   /**

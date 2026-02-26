@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 
 interface VerificationResult {
   score: number; // 0-100
@@ -30,7 +30,7 @@ export class VerificationService {
   private readonly logger = new Logger(VerificationService.name);
 
   constructor(
-    private readonly sshService: SshExecutorService,
+    private readonly sshService: SSHExecutorService,
   ) {}
 
   /**

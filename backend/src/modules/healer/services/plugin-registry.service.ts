@@ -67,7 +67,7 @@ export class PluginRegistryService implements OnModuleInit {
       });
       
       this.logger.log(`Plugin registered: ${plugin.name} v${plugin.version} (${plugin.techStack})`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to register plugin ${plugin.name}: ${error.message}`);
       throw error;
     }

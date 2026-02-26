@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 import { WpCliService } from './wp-cli.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
@@ -11,7 +11,7 @@ export class BackupService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sshService: SshExecutorService,
+    private readonly sshService: SSHExecutorService,
     private readonly wpCliService: WpCliService,
   ) {}
 

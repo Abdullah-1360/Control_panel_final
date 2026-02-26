@@ -52,7 +52,7 @@ export class PermissionsCheck extends DiagnosticCheckBase {
         permissionIssues,
       );
       
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Permissions check failed: ${error.message}`);
       return this.error(
         `Failed to check permissions: ${error.message}`,
@@ -75,8 +75,8 @@ export class PermissionsCheck extends DiagnosticCheckBase {
     
     try {
       // Check for world-writable files (777, 666)
-      const worldWritableResult = await this.sshExecutor.executeCommand(
-        server,
+      const worldWritableResult = await this.sshExecutor.executeCommandDetailed(
+        server.id,
         `find "${path}" -type f \\( -perm -002 -o -perm -020 \\) -ls 2>/dev/null | head -20`,
       );
       
@@ -91,9 +91,9 @@ export class PermissionsCheck extends DiagnosticCheckBase {
       // Check for files with overly permissive permissions (755 on sensitive files)
       const sensitiveFiles = ['.env', 'config.php', 'wp-config.php', 'database.yml', '.htaccess'];
       for (const file of sensitiveFiles) {
-        const fileExists = await this.sshExecutor.fileExists(server, `${path}/${file}`);
+        const fileExists = await this.sshExecutor.fileExists(server.id, `${path}/${file}`);
         if (fileExists) {
-          const perms = await this.sshExecutor.getFilePermissions(server, `${path}/${file}`);
+          const perms = await this.sshExecutor.getFilePermissions(server.id, `${path}/${file}`);
           if (perms) {
             checked++;
             const permNum = parseInt(perms, 10);
@@ -104,7 +104,7 @@ export class PermissionsCheck extends DiagnosticCheckBase {
         }
       }
       
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Permission check error: ${error.message}`);
     }
     

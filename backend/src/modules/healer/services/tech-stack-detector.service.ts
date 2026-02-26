@@ -36,7 +36,7 @@ export class TechStackDetectorService {
           return result;
         }
         return null;
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Plugin ${plugin.name} detection failed: ${error.message}`);
         return null;
       }

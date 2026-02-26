@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DiagnosisType } from '@prisma/client';
 import { LogAnalysisService } from './log-analysis.service';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 import { WpCliService } from './wp-cli.service';
 
 interface DiagnosisResult {
@@ -29,7 +29,7 @@ export class DiagnosisService {
 
   constructor(
     private readonly logAnalysis: LogAnalysisService,
-    private readonly sshService: SshExecutorService,
+    private readonly sshService: SSHExecutorService,
     private readonly wpCliService: WpCliService,
   ) {}
 

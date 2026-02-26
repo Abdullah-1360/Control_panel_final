@@ -6,7 +6,7 @@ import {
   IDiagnosisCheckService,
 } from '../../interfaces/diagnosis-check.interface';
 import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
-import { SshExecutorService } from '../ssh-executor.service';
+import { SSHExecutorService } from '../ssh-executor.service';
 import { WpCliService } from '../wp-cli.service';
 
 @Injectable()
@@ -14,7 +14,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
   private readonly logger = new Logger(PluginThemeAnalysisService.name);
 
   constructor(
-    private readonly sshExecutor: SshExecutorService,
+    private readonly sshExecutor: SSHExecutorService,
     private readonly wpCli: WpCliService,
   ) {}
 

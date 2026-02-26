@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from '../ssh-executor.service';
+import { SSHExecutorService } from '../ssh-executor.service';
 import { WpCliService } from '../wp-cli.service';
 import {
   IDiagnosisCheckService,
@@ -18,7 +18,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
   private readonly logger = new Logger(DatabaseHealthService.name);
 
   constructor(
-    private readonly sshExecutor: SshExecutorService,
+    private readonly sshExecutor: SSHExecutorService,
     private readonly wpCli: WpCliService,
   ) {}
 

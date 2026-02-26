@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 import { PatternLearningService } from './pattern-learning.service';
 import { Prisma } from '@prisma/client';
 
@@ -26,7 +26,7 @@ export class ManualDiagnosisService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sshExecutor: SshExecutorService,
+    private readonly sshExecutor: SSHExecutorService,
     private readonly patternLearning: PatternLearningService,
   ) {}
 

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from '../ssh-executor.service';
+import { SSHExecutorService } from '../ssh-executor.service';
 import {
   IDiagnosisCheckService,
   CheckResult,
@@ -25,7 +25,7 @@ export class PerformanceMetricsService implements IDiagnosisCheckService {
     phpExecutionTime: 30, // 30 seconds
   };
 
-  constructor(private readonly sshExecutor: SshExecutorService) {}
+  constructor(private readonly sshExecutor: SSHExecutorService) {}
 
   async check(
     serverId: string,

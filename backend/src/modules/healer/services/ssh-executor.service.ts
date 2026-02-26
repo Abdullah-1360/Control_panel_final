@@ -8,6 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SSHConnectionService, SSHConnectionConfig } from '../../servers/ssh-connection.service';
 import { EncryptionService } from '../../encryption/encryption.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 export interface CommandResult {
   success: boolean;
@@ -23,17 +24,47 @@ export class SSHExecutorService {
   constructor(
     private readonly sshService: SSHConnectionService,
     private readonly encryptionService: EncryptionService,
+    private readonly prisma: PrismaService,
   ) {}
   
   /**
-   * Execute a command on a server
+   * Execute a command on a server (backward compatible - returns string)
+   * @deprecated Use executeCommandDetailed for CommandResult object
    */
   async executeCommand(
-    server: any,
+    serverId: string,
+    command: string,
+    timeout: number = 30000,
+  ): Promise<string> {
+    const result = await this.executeCommandDetailed(serverId, command, timeout);
+    if (result.success && result.output) {
+      return result.output;
+    }
+    throw new Error(result.error || 'Command execution failed');
+  }
+  
+  /**
+   * Execute a command on a server (returns detailed result)
+   */
+  async executeCommandDetailed(
+    serverId: string,
     command: string,
     timeout: number = 30000,
   ): Promise<CommandResult> {
     try {
+      // Get server from database
+      const server = await this.prisma.servers.findUnique({
+        where: { id: serverId },
+      });
+      
+      if (!server) {
+        return {
+          success: false,
+          error: `Server ${serverId} not found`,
+          exitCode: 1,
+        };
+      }
+      
       // Build SSH config from server credentials
       const config = await this.buildSSHConfig(server, timeout);
       
@@ -64,14 +95,14 @@ export class SSHExecutorService {
    * Execute multiple commands sequentially
    */
   async executeCommands(
-    server: any,
+    serverId: string,
     commands: string[],
     timeout: number = 30000,
   ): Promise<CommandResult[]> {
     const results: CommandResult[] = [];
     
     for (const command of commands) {
-      const result = await this.executeCommand(server, command, timeout);
+      const result = await this.executeCommandDetailed(serverId, command, timeout);
       results.push(result);
       
       // Stop on first failure
@@ -86,9 +117,9 @@ export class SSHExecutorService {
   /**
    * Check if a file exists on the server
    */
-  async fileExists(server: any, path: string): Promise<boolean> {
-    const result = await this.executeCommand(
-      server,
+  async fileExists(serverId: string, path: string): Promise<boolean> {
+    const result = await this.executeCommandDetailed(
+      serverId,
       `test -f "${path}" && echo "exists" || echo "not_found"`,
     );
     
@@ -98,9 +129,9 @@ export class SSHExecutorService {
   /**
    * Check if a directory exists on the server
    */
-  async directoryExists(server: any, path: string): Promise<boolean> {
-    const result = await this.executeCommand(
-      server,
+  async directoryExists(serverId: string, path: string): Promise<boolean> {
+    const result = await this.executeCommandDetailed(
+      serverId,
       `test -d "${path}" && echo "exists" || echo "not_found"`,
     );
     
@@ -110,8 +141,8 @@ export class SSHExecutorService {
   /**
    * Read a file from the server
    */
-  async readFile(server: any, path: string): Promise<string | null> {
-    const result = await this.executeCommand(server, `cat "${path}"`);
+  async readFile(serverId: string, path: string): Promise<string | null> {
+    const result = await this.executeCommandDetailed(serverId, `cat "${path}"`);
     
     if (result.success) {
       return result.output || null;
@@ -123,9 +154,9 @@ export class SSHExecutorService {
   /**
    * Get file permissions
    */
-  async getFilePermissions(server: any, path: string): Promise<string | null> {
-    const result = await this.executeCommand(
-      server,
+  async getFilePermissions(serverId: string, path: string): Promise<string | null> {
+    const result = await this.executeCommandDetailed(
+      serverId,
       `stat -c "%a" "${path}" 2>/dev/null || stat -f "%Lp" "${path}"`,
     );
     
@@ -139,9 +170,9 @@ export class SSHExecutorService {
   /**
    * Get disk usage for a path
    */
-  async getDiskUsage(server: any, path: string): Promise<number | null> {
-    const result = await this.executeCommand(
-      server,
+  async getDiskUsage(serverId: string, path: string): Promise<number | null> {
+    const result = await this.executeCommandDetailed(
+      serverId,
       `df -h "${path}" | tail -1 | awk '{print $5}' | sed 's/%//'`,
     );
     
@@ -156,13 +187,13 @@ export class SSHExecutorService {
   /**
    * Get memory usage
    */
-  async getMemoryUsage(server: any): Promise<{
+  async getMemoryUsage(serverId: string): Promise<{
     used: number;
     total: number;
     percentage: number;
   } | null> {
-    const result = await this.executeCommand(
-      server,
+    const result = await this.executeCommandDetailed(
+      serverId,
       `free -m | grep Mem | awk '{print $3,$2}'`,
     );
     
@@ -188,9 +219,9 @@ export class SSHExecutorService {
   /**
    * Get CPU usage
    */
-  async getCPUUsage(server: any): Promise<number | null> {
-    const result = await this.executeCommand(
-      server,
+  async getCPUUsage(serverId: string): Promise<number | null> {
+    const result = await this.executeCommandDetailed(
+      serverId,
       `top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'`,
     );
     

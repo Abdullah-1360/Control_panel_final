@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 
 interface LogAnalysisResult {
   logType: string;
@@ -32,7 +32,7 @@ export class LogAnalysisService {
     DB_ACCESS_DENIED: /Access denied for user/,
   };
 
-  constructor(private readonly sshService: SshExecutorService) {}
+  constructor(private readonly sshService: SSHExecutorService) {}
 
   /**
    * Analyze all logs for a WordPress site

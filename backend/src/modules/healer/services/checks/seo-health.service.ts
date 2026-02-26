@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from '../ssh-executor.service';
+import { SSHExecutorService } from '../ssh-executor.service';
 import {
   IDiagnosisCheckService,
   CheckResult,
@@ -12,7 +12,7 @@ import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
 export class SeoHealthService implements IDiagnosisCheckService {
   private readonly logger = new Logger(SeoHealthService.name);
 
-  constructor(private readonly sshExecutor: SshExecutorService) {}
+  constructor(private readonly sshExecutor: SSHExecutorService) {}
 
   async check(
     serverId: string,

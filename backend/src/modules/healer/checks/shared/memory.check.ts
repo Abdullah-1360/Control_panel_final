@@ -29,7 +29,7 @@ export class MemoryCheck extends DiagnosticCheckBase {
   
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
-      const memoryInfo = await this.sshExecutor.getMemoryUsage(server);
+      const memoryInfo = await this.sshExecutor.getMemoryUsage(server.id);
       
       if (!memoryInfo) {
         return this.error(
@@ -61,7 +61,7 @@ export class MemoryCheck extends DiagnosticCheckBase {
         { used, total, percentage },
       );
       
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Memory check failed: ${error.message}`);
       return this.error(
         `Failed to check memory usage: ${error.message}`,

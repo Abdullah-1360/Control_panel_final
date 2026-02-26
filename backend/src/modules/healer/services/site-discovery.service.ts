@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SshExecutorService } from './ssh-executor.service';
+import { SSHExecutorService } from './ssh-executor.service';
 import { WpCliService } from './wp-cli.service';
 
 interface DiscoveredSite {
@@ -19,7 +19,7 @@ export class SiteDiscoveryService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sshService: SshExecutorService,
+    private readonly sshService: SSHExecutorService,
     private readonly wpCliService: WpCliService,
   ) {}
 

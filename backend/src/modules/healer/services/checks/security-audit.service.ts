@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SshExecutorService } from '../ssh-executor.service';
+import { SSHExecutorService } from '../ssh-executor.service';
 import {
   IDiagnosisCheckService,
   CheckResult,
@@ -35,7 +35,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     'Referrer-Policy',
   ];
 
-  constructor(private readonly sshExecutor: SshExecutorService) {}
+  constructor(private readonly sshExecutor: SSHExecutorService) {}
 
   async check(
     serverId: string,
