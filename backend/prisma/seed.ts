@@ -8,7 +8,7 @@ async function main() {
   console.log('🌱 Starting database seed...\n');
 
   // Check if any users exist
-  const existingUsers = await prisma.user.count();
+  const existingUsers = await prisma.users.count();
   if (existingUsers > 0) {
     console.log('⚠️  Database already seeded. Skipping...');
     return;
@@ -17,7 +17,7 @@ async function main() {
   // Create system roles
   console.log('📝 Creating system roles...');
   
-  const superAdminRole = await prisma.role.create({
+  const superAdminRole = await prisma.roles.create({
     data: {
       name: 'SUPER_ADMIN',
       displayName: 'Super Administrator',
@@ -32,7 +32,7 @@ async function main() {
     },
   });
 
-  const adminRole = await prisma.role.create({
+  const adminRole = await prisma.roles.create({
     data: {
       name: 'ADMIN',
       displayName: 'Administrator',
@@ -54,7 +54,7 @@ async function main() {
     },
   });
 
-  const engineerRole = await prisma.role.create({
+  const engineerRole = await prisma.roles.create({
     data: {
       name: 'ENGINEER',
       displayName: 'Engineer',
@@ -72,7 +72,7 @@ async function main() {
     },
   });
 
-  const viewerRole = await prisma.role.create({
+  const viewerRole = await prisma.roles.create({
     data: {
       name: 'VIEWER',
       displayName: 'Viewer',
@@ -103,7 +103,7 @@ async function main() {
   const adminEmail = process.env.DEFAULT_ADMIN_EMAIL || 'admin@opsmanager.local';
   const adminUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
 
-  const adminUser = await prisma.user.create({
+  const adminUser = await prisma.users.create({
     data: {
       email: adminEmail,
       username: adminUsername,
@@ -120,7 +120,7 @@ async function main() {
   console.log('✅ Default SUPER_ADMIN user created\n');
 
   // Create audit log for seed operation
-  await prisma.auditLog.create({
+  await prisma.audit_logs.create({
     data: {
       actorType: 'SYSTEM',
       action: 'DATABASE_SEED',
@@ -154,7 +154,7 @@ async function main() {
   console.log('📊 Summary:');
   console.log(`   - Roles created: 4 (SUPER_ADMIN, ADMIN, ENGINEER, VIEWER)`);
   console.log(`   - Users created: 1 (${adminUsername})`);
-  console.log(`   - Permissions created: ${await prisma.permission.count()}`);
+  console.log(`   - Permissions created: ${await prisma.permissions.count()}`);
   console.log('\n✨ Seed completed!\n');
 }
 

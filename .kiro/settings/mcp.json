@@ -1,12 +1,30 @@
 {
   "mcpServers": {
-    "memory": {
-      "command": "/home/abdullah/.nvm/versions/node/v24.12.0/bin/node",
+    "everything": {
+      "command": "npx",
       "args": [
-        "/home/abdullah/.npm/_npx/15b07286cbcc3329/node_modules/@modelcontextprotocol/server-memory/dist/index.js"
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "autoApprove": [
+        "sequentialthinking"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
       ],
       "env": {
-        "MEMORY_FILE_PATH": "/home/abdullah/StudioProjects/final_CP/.kiro/memory/opsmanager-knowledgebase.jsonl"
+        "MEMORY_FILE_PATH": "/home/abdullah/Studio Projects/Control_panel_final/.kiro/memory/opsmanager-knowledgebase.jsonl"
       },
       "autoApprove": [
         "add_observations",
@@ -18,7 +36,42 @@
         "open_nodes",
         "read_graph",
         "search_nodes"
-      ]
+      ],
+      "disabled": false
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "ctx7sk-0820319d-ed89-46c1-b77c-c3fb9aacffe3"
+      }
+    },
+    "devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "autoApprove": [
+        "execute_command",
+        "list_commands"
+      ],
+      "disabled": true
+    },
+    "postgres": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DATABASE_URI",
+        "crystaldba/postgres-mcp",
+        "--access-mode=unrestricted"
+      ],
+      "env": {
+        "DATABASE_URI": "postgresql://opsmanager:dev_password_change_in_production@localhost:5432/opsmanager_dev"
+      },
+      "disabled": true
     }
   }
 }
