@@ -43,7 +43,11 @@
       "url": "https://mcp.context7.com/mcp",
       "headers": {
         "CONTEXT7_API_KEY": "ctx7sk-0820319d-ed89-46c1-b77c-c3fb9aacffe3"
-      }
+      },
+      "autoApprove": [
+        "query-docs",
+        "resolve-library-id"
+      ]
     },
     "devtools": {
       "command": "npx",

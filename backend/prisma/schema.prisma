@@ -595,6 +595,7 @@ model servers {
   server_test_history   server_test_history[]
   users                 users                 @relation(fields: [createdByUserId], references: [id])
   wp_sites              wp_sites[]
+  applications          applications[]        // Universal Healer - new relation
 
   @@index([createdByUserId])
   @@index([deletedAt])
@@ -952,4 +953,189 @@ enum Severity {
   WARNING
   HIGH
   CRITICAL
+}
+
+// ============================================================================
+// UNIVERSAL HEALER - NEW MODELS (Phase 1)
+// ============================================================================
+
+// Applications table (replaces wp_sites for universal tech stack support)
+model applications {
+  id                      String                @id @default(uuid())
+  serverId                String                @map("server_id")
+  domain                  String
+  path                    String
+  
+  // Tech Stack Information
+  techStack               TechStack             @map("tech_stack")
+  techStackVersion        String?               @map("tech_stack_version")
+  detectionMethod         DetectionMethod       @default(AUTO) @map("detection_method")
+  detectionConfidence     Float                 @default(0.0) @map("detection_confidence") // 0.0 to 1.0
+  
+  // Health & Status
+  healthStatus            HealthStatus          @default(UNKNOWN) @map("health_status")
+  healthScore             Int?                  @map("health_score") // 0-100
+  lastHealthCheck         DateTime?             @map("last_health_check")
+  
+  // Healing Configuration
+  healingMode             HealingMode           @default(MANUAL) @map("healing_mode")
+  isHealerEnabled         Boolean               @default(false) @map("is_healer_enabled")
+  maxHealingAttempts      Int                   @default(3) @map("max_healing_attempts")
+  healingCooldown         Int                   @default(3600) @map("healing_cooldown") // seconds
+  currentHealingAttempts  Int                   @default(0) @map("current_healing_attempts")
+  lastHealingAttempt      DateTime?             @map("last_healing_attempt")
+  
+  // Circuit Breaker
+  circuitBreakerState     CircuitBreakerState   @default(CLOSED) @map("circuit_breaker_state")
+  circuitBreakerResetAt   DateTime?             @map("circuit_breaker_reset_at")
+  consecutiveFailures     Int                   @default(0) @map("consecutive_failures")
+  
+  // Metadata (JSONB for flexibility - tech-stack-specific data)
+  metadata                Json                  @default("{}")
+  
+  // Timestamps
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @updatedAt @map("updated_at")
+  
+  // Relations
+  servers                 servers               @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  diagnostic_results      diagnostic_results[]
+  healing_executions_new  healing_executions_new[]
+  
+  @@unique([serverId, domain, path])
+  @@index([techStack])
+  @@index([healthStatus])
+  @@index([isHealerEnabled])
+  @@index([serverId])
+  @@index([circuitBreakerState])
+  @@map("applications")
+}
+
+// Diagnostic check results
+model diagnostic_results {
+  id              String          @id @default(uuid())
+  applicationId   String          @map("application_id")
+  checkName       String          @map("check_name")
+  checkCategory   CheckCategory   @map("check_category")
+  status          CheckStatus
+  severity        RiskLevel
+  message         String
+  details         Json            @default("{}")
+  suggestedFix    String?         @map("suggested_fix")
+  executionTime   Int             @map("execution_time") // milliseconds
+  createdAt       DateTime        @default(now()) @map("created_at")
+  
+  applications    applications    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@index([applicationId])
+  @@index([checkCategory])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("diagnostic_results")
+}
+
+// Tech stack plugins metadata
+model tech_stack_plugins {
+  id            String      @id @default(uuid())
+  name          String      @unique
+  techStack     TechStack   @map("tech_stack")
+  version       String
+  isEnabled     Boolean     @default(true) @map("is_enabled")
+  isBuiltIn     Boolean     @default(true) @map("is_built_in")
+  npmPackage    String?     @map("npm_package") // For community plugins
+  configuration Json        @default("{}")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  
+  @@index([techStack])
+  @@index([isEnabled])
+  @@map("tech_stack_plugins")
+}
+
+// New healing executions table (separate from old one for clean architecture)
+model healing_executions_new {
+  id                String          @id @default(uuid())
+  applicationId     String          @map("application_id")
+  trigger           HealerTrigger
+  triggeredBy       String?         @map("triggered_by")
+  
+  // Diagnosis
+  diagnosticResults Json            @map("diagnostic_results")
+  healthScore       Int?            @map("health_score")
+  
+  // Healing Plan
+  healingPlan       Json            @map("healing_plan") // { autoHeal: [], requireApproval: [], cannotHeal: [] }
+  approvedActions   String[]        @map("approved_actions")
+  
+  // Execution
+  status            HealerStatus
+  backupCreated     Boolean         @default(false) @map("backup_created")
+  backupPath        String?         @map("backup_path")
+  actionsExecuted   Json            @default("[]") @map("actions_executed")
+  executionLogs     String          @map("execution_logs") @db.Text
+  errorMessage      String?         @map("error_message")
+  
+  // Timestamps
+  startedAt         DateTime        @default(now()) @map("started_at")
+  diagnosedAt       DateTime?       @map("diagnosed_at")
+  approvedAt        DateTime?       @map("approved_at")
+  healedAt          DateTime?       @map("healed_at")
+  completedAt       DateTime?       @map("completed_at")
+  
+  applications      applications    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@index([applicationId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("healing_executions_new")
+}
+
+// ============================================================================
+// NEW ENUMS FOR UNIVERSAL HEALER
+// ============================================================================
+
+enum TechStack {
+  WORDPRESS
+  NODEJS
+  PHP_GENERIC
+  LARAVEL
+  NEXTJS
+  EXPRESS
+  DJANGO      // Future
+  FLASK       // Future
+  RAILS       // Future
+  MYSQL       // Database
+  POSTGRESQL  // Future
+  MONGODB     // Future
+  REDIS       // Future
+}
+
+enum DetectionMethod {
+  AUTO
+  MANUAL
+  HYBRID
+}
+
+enum CheckCategory {
+  SYSTEM        // Disk, memory, CPU
+  SECURITY      // Permissions, vulnerabilities
+  PERFORMANCE   // Slow queries, caching
+  CONFIGURATION // Config files, environment
+  DEPENDENCIES  // Package versions, updates
+  DATABASE      // Connection, integrity
+}
+
+enum CheckStatus {
+  PASS
+  WARN
+  FAIL
+  ERROR
+}
+
+enum RiskLevel {
+  LOW       // Safe to auto-heal
+  MEDIUM    // Requires caution
+  HIGH      // Requires manual approval
+  CRITICAL  // Never auto-heal
 }

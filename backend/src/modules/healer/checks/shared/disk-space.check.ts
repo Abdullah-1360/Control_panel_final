@@ -1,0 +1,78 @@
+/**
+ * Disk Space Check - Shared across all tech stacks
+ * 
+ * Checks available disk space on the server
+ */
+
+import { Injectable, Logger } from '@nestjs/common';
+import { CheckCategory, CheckStatus, RiskLevel, TechStack } from '@prisma/client';
+import { DiagnosticCheckBase } from '../../core/diagnostic-check.base';
+import { CheckResult, DiagnosticCheckMetadata } from '../../core/interfaces';
+
+@Injectable()
+export class DiskSpaceCheck extends DiagnosticCheckBase {
+  private readonly logger = new Logger(DiskSpaceCheck.name);
+  
+  readonly metadata: DiagnosticCheckMetadata = {
+    name: 'disk_space',
+    category: CheckCategory.SYSTEM,
+    riskLevel: RiskLevel.MEDIUM,
+    description: 'Check available disk space',
+    applicableTo: Object.values(TechStack), // Applies to all tech stacks
+    timeout: 10000, // 10 seconds
+  };
+  
+  async execute(application: any, server: any): Promise<CheckResult> {
+    try {
+      // Execute df command to check disk usage
+      const command = `df -h ${application.path} | tail -1 | awk '{print $5}' | sed 's/%//'`;
+      
+      // TODO: Use SSH service to execute command
+      // For now, simulate the result
+      const usage = await this.getDiskUsage(server, application.path);
+      
+      if (usage >= 95) {
+        return this.fail(
+          `Disk usage critically high at ${usage}%`,
+          { usage, threshold: 95 },
+          'Free up disk space immediately or expand storage. Consider removing old logs, temporary files, or unused data.',
+        );
+      }
+      
+      if (usage >= 90) {
+        return this.warn(
+          `Disk usage high at ${usage}%`,
+          { usage, threshold: 90 },
+          'Free up disk space or expand storage soon to prevent issues.',
+        );
+      }
+      
+      if (usage >= 80) {
+        return this.warn(
+          `Disk usage at ${usage}%`,
+          { usage, threshold: 80 },
+          'Monitor disk usage and plan for cleanup or expansion.',
+        );
+      }
+      
+      return this.pass(`Disk usage healthy at ${usage}%`, { usage });
+      
+    } catch (error) {
+      this.logger.error(`Disk space check failed: ${error.message}`);
+      return this.error(
+        `Failed to check disk space: ${error.message}`,
+        { error: error.message },
+      );
+    }
+  }
+  
+  /**
+   * Get disk usage percentage for the given path
+   * TODO: Implement actual SSH command execution
+   */
+  private async getDiskUsage(server: any, path: string): Promise<number> {
+    // Placeholder implementation
+    // In real implementation, this would use SSH service
+    return Math.floor(Math.random() * 100);
+  }
+}
