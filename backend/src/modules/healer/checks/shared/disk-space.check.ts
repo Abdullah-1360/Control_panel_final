@@ -8,10 +8,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckCategory, CheckStatus, RiskLevel, TechStack } from '@prisma/client';
 import { DiagnosticCheckBase } from '../../core/diagnostic-check.base';
 import { CheckResult, DiagnosticCheckMetadata } from '../../core/interfaces';
+import { SSHExecutorService } from '../../services/ssh-executor.service';
 
 @Injectable()
 export class DiskSpaceCheck extends DiagnosticCheckBase {
   private readonly logger = new Logger(DiskSpaceCheck.name);
+  
+  constructor(private readonly sshExecutor: SSHExecutorService) {
+    super();
+  }
   
   readonly metadata: DiagnosticCheckMetadata = {
     name: 'disk_space',
@@ -24,12 +29,15 @@ export class DiskSpaceCheck extends DiagnosticCheckBase {
   
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
-      // Execute df command to check disk usage
-      const command = `df -h ${application.path} | tail -1 | awk '{print $5}' | sed 's/%//'`;
+      // Get disk usage using SSH executor
+      const usage = await this.sshExecutor.getDiskUsage(server, application.path);
       
-      // TODO: Use SSH service to execute command
-      // For now, simulate the result
-      const usage = await this.getDiskUsage(server, application.path);
+      if (usage === null) {
+        return this.error(
+          'Failed to retrieve disk usage information',
+          { error: 'Command execution failed' },
+        );
+      }
       
       if (usage >= 95) {
         return this.fail(
@@ -64,15 +72,5 @@ export class DiskSpaceCheck extends DiagnosticCheckBase {
         { error: error.message },
       );
     }
-  }
-  
-  /**
-   * Get disk usage percentage for the given path
-   * TODO: Implement actual SSH command execution
-   */
-  private async getDiskUsage(server: any, path: string): Promise<number> {
-    // Placeholder implementation
-    // In real implementation, this would use SSH service
-    return Math.floor(Math.random() * 100);
   }
 }

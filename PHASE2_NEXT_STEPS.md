@@ -1,353 +1,409 @@
-# Phase 2: Intelligence Layer - Implementation Guide
+# Universal Healer - Phase 2: Plugin Implementation
 
-## Status: Ready to Start
+## Overview
+Phase 2 focuses on implementing tech stack plugins, starting with WordPress to maintain backward compatibility, followed by Node.js, Laravel, and other tech stacks.
 
-Phase 1 (Production Readiness) is complete. All TypeScript errors are resolved, and the system is ready for Phase 2 implementation.
+## Phase 2 Goals
+1. Implement WordPress plugin (maintain existing functionality)
+2. Implement Node.js plugin
+3. Implement Laravel plugin
+4. Implement PHP Generic plugin
+5. Implement Next.js plugin
+6. Implement Express plugin
+7. Implement MySQL diagnostic plugin
+8. Update healer module to use new plugin system
+9. Write comprehensive tests
 
----
+## Priority Order
 
-## Phase 2 Overview
+### P0 - Critical (Week 1-2)
+1. **WordPress Plugin** - Maintain existing functionality
+   - Detection logic (wp-config.php, wp-content, wp-includes)
+   - WordPress-specific diagnostic checks
+   - WordPress healing strategies
+   - WordPress backup strategy
+   - Register plugin in PluginRegistryService
 
-**Goal**: Add AI-powered intelligence for root cause analysis and predictive maintenance
+### P1 - High Priority (Week 3-4)
+2. **Node.js Plugin** - Second most common tech stack
+   - Detection logic (package.json, node_modules, server.js)
+   - Node.js diagnostic checks (npm audit, dependency check)
+   - Node.js healing strategies (npm install, restart PM2)
+   - Node.js backup strategy
 
-**Duration**: 4 weeks
+3. **Update Healer Module** - Integrate new plugin system
+   - Update healer.service.ts to use PluginRegistryService
+   - Update diagnosis flow to use TechStackDetectorService
+   - Update healing flow to use HealingStrategyEngineService
+   - Maintain backward compatibility with wp_sites
 
-**Priority**: P1 (Should-Have)
+### P2 - Medium Priority (Week 5-6)
+4. **Laravel Plugin**
+   - Detection logic (artisan, composer.json, app/, config/)
+   - Laravel diagnostic checks (composer audit, config cache)
+   - Laravel healing strategies (composer install, artisan optimize)
+   - Laravel backup strategy
 
-**Key Features**:
-1. AI-Powered Root Cause Analysis (OpenAI GPT-4)
-2. Predictive Maintenance
-3. Performance Baselines
-4. Enhanced Pattern Learning
+5. **PHP Generic Plugin**
+   - Detection logic (index.php, composer.json without framework)
+   - PHP diagnostic checks (PHP version, extensions, config)
+   - PHP healing strategies (restart PHP-FPM, clear opcache)
+   - PHP backup strategy
 
----
+### P3 - Lower Priority (Week 7-8)
+6. **Next.js Plugin**
+   - Detection logic (next.config.js, .next/, pages/ or app/)
+   - Next.js diagnostic checks (build errors, dependencies)
+   - Next.js healing strategies (npm install, rebuild)
+   - Next.js backup strategy
 
-## 2.1 AI-Powered Root Cause Analysis
+7. **Express Plugin**
+   - Detection logic (express in package.json, app.js/server.js)
+   - Express diagnostic checks (dependencies, routes)
+   - Express healing strategies (npm install, restart)
+   - Express backup strategy
 
-### Prerequisites
+8. **MySQL Diagnostic Plugin**
+   - Detection logic (MySQL connection from application)
+   - MySQL diagnostic checks (connection, slow queries, table health)
+   - MySQL healing strategies (optimize tables, restart)
+   - MySQL backup strategy
 
-1. **OpenAI API Key**: Sign up at https://platform.openai.com/
-2. **Add to .env**:
-   ```
-   OPENAI_API_KEY=sk-...your-key-here...
-   ```
+## Implementation Details
 
-### Database Schema (Already in schema.prisma)
-
-The following fields are already added to HealerExecution:
-- `aiAnalysis` (JSON with AI insights)
-- `aiConfidence` (0.0-1.0)
-- `aiRecommendations` (JSON array)
-- `aiReasoning` (explanation)
-- `aiModel` (e.g., "gpt-4")
-- `aiTokensUsed` (token count)
-
-### New Model Needed: AiAnalysisCache
-
-Add to `backend/prisma/schema.prisma`:
-
-```prisma
-model AiAnalysisCache {
-  id              String   @id @default(uuid())
-  
-  // Input hash (for deduplication)
-  inputHash       String   @unique
-  
-  // Input data
-  diagnosisType   DiagnosisType
-  errorSignature  String   @db.Text
-  logSample       String   @db.Text
-  
-  // AI response
-  analysis        String   @db.Text // JSON
-  confidence      Float
-  recommendations String   @db.Text // JSON array
-  reasoning       String   @db.Text
-  
-  // Metadata
-  model           String
-  tokensUsed      Int
-  responseTime    Int      // milliseconds
-  
-  // Usage tracking
-  hitCount        Int      @default(1)
-  lastUsedAt      DateTime @default(now())
-  
-  createdAt       DateTime @default(now())
-  expiresAt       DateTime // Cache for 30 days
-  
-  @@index([inputHash])
-  @@index([diagnosisType])
-  @@index([expiresAt])
-  @@map("ai_analysis_cache")
-}
-```
-
-### Implementation Steps
-
-1. **Create Migration**:
-   ```bash
-   cd backend
-   npx prisma migrate dev --name add_ai_analysis_cache
-   ```
-
-2. **Create AiAnalysisService**:
-   - File: `backend/src/modules/healer/services/ai-analysis.service.ts`
-   - Features:
-     - Call OpenAI GPT-4 API
-     - Cache results (30-day TTL)
-     - Parse AI responses
-     - Handle errors gracefully
-   - See full implementation in `docs/HEALER_INTELLIGENCE_IMPLEMENTATION_PLAN.md` (lines 2024-2646)
-
-3. **Update DiagnosisService**:
-   - Inject AiAnalysisService
-   - Call AI analysis after diagnosis
-   - Enhance diagnosis with AI insights
-   - Use AI suggested commands if confidence > 0.8
-
-4. **Add to HealerModule**:
-   ```typescript
-   providers: [
-     // ... existing providers
-     AiAnalysisService,
-   ]
-   ```
-
-5. **Update HealingProcessor**:
-   - Store AI analysis results in execution
-   - Log AI insights to execution logs
-
-6. **Add Cron Job for Cache Cleanup**:
-   ```typescript
-   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-   async cleanAiCache() {
-     await this.aiAnalysisService.cleanExpiredCache();
-   }
-   ```
-
-### API Endpoints (Optional)
-
-Add to HealerController:
+### WordPress Plugin Structure
 
 ```typescript
-/**
- * POST /api/v1/healer/executions/:id/ai-analyze
- * Trigger AI analysis for an execution
- */
-@Post('executions/:id/ai-analyze')
-async triggerAiAnalysis(@Param('id') executionId: string) {
-  const result = await this.aiAnalysisService.analyzeExecution(executionId);
-  return { data: result };
-}
-
-/**
- * GET /api/v1/healer/ai-cache/stats
- * Get AI cache statistics
- */
-@Get('ai-cache/stats')
-async getAiCacheStats() {
-  const stats = await this.aiAnalysisService.getCacheStats();
-  return { data: stats };
-}
-```
-
-### Testing
-
-1. **Unit Tests**:
-   - Test AI response parsing
-   - Test cache hit/miss logic
-   - Test error handling
-
-2. **Integration Tests**:
-   - Test full diagnosis with AI analysis
-   - Test cache behavior
-   - Test OpenAI API integration (with mocks)
-
-3. **Manual Testing**:
-   - Diagnose a site with WSOD
-   - Verify AI analysis appears in execution
-   - Check AI suggested commands
-   - Verify cache is working
-
-### Cost Considerations
-
-- **GPT-4 Turbo**: ~$0.01 per 1K input tokens, ~$0.03 per 1K output tokens
-- **Average diagnosis**: ~500 input tokens, ~300 output tokens = ~$0.015 per diagnosis
-- **Cache hit rate**: Expect 60-80% cache hits after initial period
-- **Monthly cost** (1000 diagnoses, 30% cache miss): ~$4.50/month
-
----
-
-## 2.2 Predictive Maintenance
-
-### Goal
-Detect anomalies and predict issues before they occur.
-
-### Features
-- Baseline performance tracking
-- Anomaly detection (response time, error rate)
-- Predictive alerts
-- Trend analysis
-
-### Implementation
-- Create `PredictiveMaintenanceService`
-- Track metrics over time
-- Use statistical methods for anomaly detection
-- Create alerts for predicted issues
-
-### Database Schema
-```prisma
-model PerformanceBaseline {
-  id              String   @id @default(uuid())
-  siteId          String
-  site            WpSite   @relation(fields: [siteId], references: [id])
+// backend/src/modules/healer/plugins/wordpress/wordpress.plugin.ts
+export class WordPressPlugin extends StackPluginBase {
+  readonly name = 'WordPress';
+  readonly version = '1.0.0';
+  readonly supportedVersions = ['5.0+', '6.0+'];
+  readonly techStack = TechStack.WORDPRESS;
   
-  // Baseline metrics
-  avgResponseTime Int      // milliseconds
-  avgPageSize     Int      // bytes
-  avgErrorRate    Float    // 0.0-1.0
+  async detect(server: any, path: string): Promise<DetectionResult> {
+    // Check for wp-config.php, wp-content, wp-includes
+    // Extract WordPress version
+    // Return detection result with confidence
+  }
   
-  // Calculated from
-  sampleSize      Int
-  periodStart     DateTime
-  periodEnd       DateTime
+  getDiagnosticChecks(): IDiagnosticCheck[] {
+    return [
+      // Shared checks
+      new DiskSpaceCheck(this.sshExecutor),
+      new MemoryCheck(this.sshExecutor),
+      new CpuCheck(this.sshExecutor),
+      new PermissionsCheck(this.sshExecutor),
+      
+      // WordPress-specific checks
+      new WordPressVersionCheck(this.sshExecutor),
+      new WordPressCoreIntegrityCheck(this.sshExecutor),
+      new WordPressPluginCheck(this.sshExecutor),
+      new WordPressThemeCheck(this.sshExecutor),
+      new WordPressDatabaseCheck(this.sshExecutor),
+      new WordPressPerformanceCheck(this.sshExecutor),
+    ];
+  }
   
-  createdAt       DateTime @default(now())
+  getHealingStrategies(): IHealingStrategy[] {
+    return [
+      new WordPressCoreRepairStrategy(),
+      new WordPressPluginRepairStrategy(),
+      new WordPressThemeRepairStrategy(),
+      new WordPressDatabaseRepairStrategy(),
+      new WordPressPermissionRepairStrategy(),
+      new WordPressCacheRepairStrategy(),
+    ];
+  }
   
-  @@index([siteId])
-  @@map("performance_baselines")
-}
-
-model PredictiveAlert {
-  id              String   @id @default(uuid())
-  siteId          String
-  
-  alertType       String   // PERFORMANCE_DEGRADATION, ERROR_SPIKE, etc.
-  severity        String   // LOW, MEDIUM, HIGH
-  prediction      String   @db.Text // What we predict will happen
-  confidence      Float    // 0.0-1.0
-  
-  // Evidence
-  currentMetrics  String   @db.Text // JSON
-  baselineMetrics String   @db.Text // JSON
-  deviation       Float    // How far from baseline
-  
-  createdAt       DateTime @default(now())
-  
-  @@index([siteId])
-  @@map("predictive_alerts")
+  getBackupStrategy(): IBackupStrategy {
+    return new WordPressBackupStrategy();
+  }
 }
 ```
 
----
+### WordPress-Specific Diagnostic Checks
 
-## 2.3 Performance Baselines
+1. **WordPressVersionCheck**
+   - Check WordPress version
+   - Compare with latest stable version
+   - Warn if outdated or unsupported
 
-### Goal
-Establish normal performance baselines for each site.
+2. **WordPressCoreIntegrityCheck**
+   - Verify core files haven't been modified
+   - Check for missing core files
+   - Detect malware in core files
 
-### Features
-- Track response time, page size, error rate
-- Calculate baselines from historical data
-- Detect deviations from baseline
-- Alert on significant changes
+3. **WordPressPluginCheck**
+   - List installed plugins
+   - Check for outdated plugins
+   - Check for vulnerable plugins
+   - Check for deactivated plugins
 
-### Implementation
-- Create `BaselineService`
-- Calculate baselines weekly
-- Store in PerformanceBaseline model
-- Use in anomaly detection
+4. **WordPressThemeCheck**
+   - List installed themes
+   - Check for outdated themes
+   - Check for vulnerable themes
+   - Check for unused themes
 
----
+5. **WordPressDatabaseCheck**
+   - Check database connection
+   - Check database size
+   - Check for corrupted tables
+   - Check for orphaned data
 
-## 2.4 Enhanced Pattern Learning
+6. **WordPressPerformanceCheck**
+   - Check for caching plugins
+   - Check for optimization plugins
+   - Check for large media files
+   - Check for slow queries
 
-### Goal
-Improve pattern learning with AI insights and auto-approval.
+### WordPress Healing Strategies
 
-### Features
-- AI-enhanced pattern matching
-- Auto-approval for high-confidence patterns
-- Pattern versioning
-- Pattern effectiveness tracking
+1. **WordPressCoreRepairStrategy**
+   - Repair corrupted core files
+   - Update WordPress core
+   - Fix file permissions
 
-### Database Schema Updates
-```prisma
-model HealingPattern {
-  // ... existing fields ...
+2. **WordPressPluginRepairStrategy**
+   - Update plugins
+   - Deactivate problematic plugins
+   - Remove vulnerable plugins
+
+3. **WordPressThemeRepairStrategy**
+   - Update themes
+   - Switch to default theme if broken
+   - Remove vulnerable themes
+
+4. **WordPressDatabaseRepairStrategy**
+   - Repair corrupted tables
+   - Optimize database
+   - Clean up orphaned data
+
+5. **WordPressPermissionRepairStrategy**
+   - Fix file permissions (644 for files, 755 for directories)
+   - Fix ownership
+   - Secure wp-config.php (400)
+
+6. **WordPressCacheRepairStrategy**
+   - Clear object cache
+   - Clear page cache
+   - Clear transients
+
+### Node.js Plugin Structure
+
+```typescript
+// backend/src/modules/healer/plugins/nodejs/nodejs.plugin.ts
+export class NodeJsPlugin extends StackPluginBase {
+  readonly name = 'Node.js';
+  readonly version = '1.0.0';
+  readonly supportedVersions = ['14+', '16+', '18+', '20+'];
+  readonly techStack = TechStack.NODEJS;
   
-  // Enhanced fields
-  version         Int      @default(1)
-  aiEnhanced      Boolean  @default(false)
-  aiConfidence    Float?
-  autoApproved    Boolean  @default(false)
-  approvedBy      String?
-  approvedAt      DateTime?
+  async detect(server: any, path: string): Promise<DetectionResult> {
+    // Check for package.json, node_modules, server.js/index.js
+    // Extract Node.js version
+    // Return detection result with confidence
+  }
   
-  // Effectiveness tracking
-  lastUsedAt      DateTime?
-  avgSuccessRate  Float?   // Rolling average
-  recentSuccesses Int      @default(0)
-  recentFailures  Int      @default(0)
+  getDiagnosticChecks(): IDiagnosticCheck[] {
+    return [
+      // Shared checks
+      new DiskSpaceCheck(this.sshExecutor),
+      new MemoryCheck(this.sshExecutor),
+      new CpuCheck(this.sshExecutor),
+      new PermissionsCheck(this.sshExecutor),
+      
+      // Node.js-specific checks
+      new NodeVersionCheck(this.sshExecutor),
+      new NodeDependencyCheck(this.sshExecutor),
+      new NodeSecurityCheck(this.sshExecutor),
+      new NodeProcessCheck(this.sshExecutor),
+      new NodePerformanceCheck(this.sshExecutor),
+    ];
+  }
+  
+  getHealingStrategies(): IHealingStrategy[] {
+    return [
+      new NodeDependencyRepairStrategy(),
+      new NodeProcessRepairStrategy(),
+      new NodeSecurityRepairStrategy(),
+      new NodePerformanceRepairStrategy(),
+    ];
+  }
+  
+  getBackupStrategy(): IBackupStrategy {
+    return new NodeJsBackupStrategy();
+  }
 }
 ```
 
+## Integration with Existing Healer Module
+
+### Update healer.service.ts
+
+```typescript
+// Before (WordPress-specific)
+async diagnose(siteId: string, triggeredBy?: string, subdomain?: string) {
+  // WordPress-specific diagnosis logic
+}
+
+// After (Universal)
+async diagnose(applicationId: string, triggeredBy?: string) {
+  // 1. Get application from database
+  const application = await this.prisma.applications.findUnique({
+    where: { id: applicationId },
+    include: { servers: true },
+  });
+  
+  // 2. Get plugin for tech stack
+  const plugin = this.pluginRegistry.getPlugin(application.techStack);
+  
+  // 3. Get diagnostic checks from plugin
+  const checks = plugin.getDiagnosticChecks();
+  
+  // 4. Execute all checks
+  const results = await Promise.all(
+    checks.map(check => check.execute(application, application.servers))
+  );
+  
+  // 5. Store results in database
+  await this.storeDiagnosticResults(applicationId, results);
+  
+  // 6. Determine healing plan
+  const healingPlan = await this.healingStrategyEngine.determineHealingPlan(
+    application,
+    results,
+    application.healingMode,
+  );
+  
+  // 7. Return diagnosis with healing plan
+  return { results, healingPlan };
+}
+```
+
+## Testing Strategy
+
+### Unit Tests
+- Test each diagnostic check in isolation
+- Test each healing strategy in isolation
+- Test plugin detection logic
+- Test healing strategy engine logic
+- Mock SSH executor for fast tests
+
+### Integration Tests
+- Test full diagnosis flow with real SSH connections
+- Test healing execution with real servers
+- Test plugin registration and lifecycle
+- Test tech stack detection with real applications
+
+### E2E Tests
+- Test complete workflow: detect → diagnose → heal → verify
+- Test with multiple tech stacks
+- Test healing modes (MANUAL, SUPERVISED, AUTO)
+- Test rollback functionality
+
+## Migration Strategy
+
+### Backward Compatibility
+1. Keep wp_sites table for existing WordPress sites
+2. Gradually migrate wp_sites to applications table
+3. Support both tables during transition period
+4. Provide migration script for bulk migration
+
+### Migration Script
+```typescript
+// backend/scripts/migrate-wp-sites-to-applications.ts
+async function migrateWpSitesToApplications() {
+  const wpSites = await prisma.wp_sites.findMany();
+  
+  for (const site of wpSites) {
+    await prisma.applications.create({
+      data: {
+        serverId: site.serverId,
+        name: site.domain,
+        path: site.path,
+        techStack: TechStack.WORDPRESS,
+        techStackVersion: site.wpVersion,
+        detectionMethod: DetectionMethod.MANUAL,
+        detectionConfidence: 1.0,
+        healingMode: site.healingMode,
+        isHealerEnabled: site.isHealerEnabled,
+        // ... other fields
+      },
+    });
+  }
+}
+```
+
+## Success Criteria
+
+### Phase 2 Complete When:
+- ✅ WordPress plugin implemented and tested
+- ✅ Node.js plugin implemented and tested
+- ✅ Laravel plugin implemented and tested
+- ✅ Healer module updated to use plugin system
+- ✅ Backward compatibility maintained
+- ✅ Unit tests written (80%+ coverage)
+- ✅ Integration tests written
+- ✅ Manual testing with real servers successful
+- ✅ Migration script tested
+- ✅ Documentation updated
+
+## Timeline
+
+### Week 1-2: WordPress Plugin
+- Day 1-2: Detection logic
+- Day 3-5: Diagnostic checks
+- Day 6-8: Healing strategies
+- Day 9-10: Backup strategy, testing
+
+### Week 3-4: Node.js Plugin + Integration
+- Day 1-2: Node.js detection logic
+- Day 3-5: Node.js diagnostic checks
+- Day 6-7: Node.js healing strategies
+- Day 8-9: Update healer module
+- Day 10: Testing and bug fixes
+
+### Week 5-6: Laravel + PHP Generic
+- Day 1-3: Laravel plugin
+- Day 4-6: PHP Generic plugin
+- Day 7-10: Testing and refinement
+
+### Week 7-8: Next.js + Express + MySQL
+- Day 1-2: Next.js plugin
+- Day 3-4: Express plugin
+- Day 5-6: MySQL diagnostic plugin
+- Day 7-10: Comprehensive testing
+
+## Risk Mitigation
+
+### Risks
+1. **Breaking existing WordPress functionality**
+   - Mitigation: Maintain backward compatibility, extensive testing
+   
+2. **SSH command failures on different OS**
+   - Mitigation: Test on multiple OS (Ubuntu, CentOS, Debian)
+   
+3. **Performance degradation with multiple checks**
+   - Mitigation: Run checks in parallel, implement timeouts
+   
+4. **Plugin conflicts or errors**
+   - Mitigation: Isolate plugin errors, graceful degradation
+
+## Next Actions
+
+1. ✅ Review Phase 1 completion
+2. ⏳ Start WordPress plugin implementation
+3. ⏳ Create WordPress-specific diagnostic checks
+4. ⏳ Create WordPress healing strategies
+5. ⏳ Test WordPress plugin with real server
+6. ⏳ Update healer module integration
+7. ⏳ Write unit tests
+8. ⏳ Proceed to Node.js plugin
+
 ---
 
-## Implementation Priority
-
-### Week 1-2: AI Root Cause Analysis
-- [ ] Add AiAnalysisCache model
-- [ ] Create migration
-- [ ] Implement AiAnalysisService
-- [ ] Update DiagnosisService
-- [ ] Add to HealerModule
-- [ ] Write tests
-- [ ] Test with real sites
-
-### Week 3: Predictive Maintenance
-- [ ] Add PerformanceBaseline model
-- [ ] Add PredictiveAlert model
-- [ ] Create migration
-- [ ] Implement PredictiveMaintenanceService
-- [ ] Add cron jobs for baseline calculation
-- [ ] Write tests
-
-### Week 4: Enhanced Pattern Learning
-- [ ] Update HealingPattern model
-- [ ] Create migration
-- [ ] Enhance PatternLearningService
-- [ ] Add auto-approval logic
-- [ ] Add pattern versioning
-- [ ] Write tests
-
----
-
-## Success Metrics
-
-### Phase 2 Targets
-- AI analysis accuracy: >90%
-- Cache hit rate: >70%
-- Predictive alert accuracy: >80%
-- Pattern auto-approval rate: >60%
-- AI cost per diagnosis: <$0.02
-
----
-
-## Next Steps
-
-1. **Get OpenAI API Key**: Sign up and add to .env
-2. **Add AiAnalysisCache model**: Update schema.prisma
-3. **Create migration**: `npx prisma migrate dev`
-4. **Implement AiAnalysisService**: Copy from implementation plan
-5. **Update DiagnosisService**: Add AI analysis integration
-6. **Test**: Write unit tests and test with real sites
-
----
-
-**Ready to Start**: All Phase 1 dependencies are complete. Phase 2 can begin immediately.
-
-**Estimated Completion**: 4 weeks from start date
-
-**Blockers**: None (OpenAI API key is the only external dependency)
+**Status:** Ready to begin Phase 2  
+**Next Task:** Implement WordPress Plugin  
+**Estimated Completion:** 8 weeks from start

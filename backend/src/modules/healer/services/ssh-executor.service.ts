@@ -1,167 +1,232 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ServersService } from '../../servers/servers.service';
-import { SSHConnectionService } from '../../servers/ssh-connection.service';
-
 /**
- * SSH Executor Service for Healer Module
- * Executes SSH commands on servers using Module 2's SSH infrastructure
+ * SSH Executor Service
+ * 
+ * Wrapper around SSH connection service for diagnostic checks and healing actions
+ * Provides simplified interface for executing commands on remote servers
  */
+
+import { Injectable, Logger } from '@nestjs/common';
+import { SSHConnectionService, SSHConnectionConfig } from '../../servers/ssh-connection.service';
+import { EncryptionService } from '../../encryption/encryption.service';
+
+export interface CommandResult {
+  success: boolean;
+  output?: string;
+  error?: string;
+  exitCode?: number;
+}
+
 @Injectable()
-export class SshExecutorService {
-  private readonly logger = new Logger(SshExecutorService.name);
-
-  // Retry configuration
-  private readonly MAX_RETRIES = 3;
-  private readonly INITIAL_RETRY_DELAY = 1000; // 1 second
-  private readonly MAX_RETRY_DELAY = 10000; // 10 seconds
+export class SSHExecutorService {
+  private readonly logger = new Logger(SSHExecutorService.name);
   
-  // Transient errors that should trigger retry
-  private readonly TRANSIENT_ERRORS = [
-    'ECONNRESET',
-    'ETIMEDOUT',
-    'ECONNREFUSED',
-    'Connection lost before handshake',
-    'Connection lost',
-    'Connection closed before handshake',
-    'Keepalive timeout',
-    'read ECONNRESET',
-    'write ECONNRESET',
-    'Connection reset',
-    'network issue',
-  ];
-
   constructor(
-    private readonly serversService: ServersService,
-    private readonly sshConnection: SSHConnectionService,
+    private readonly sshService: SSHConnectionService,
+    private readonly encryptionService: EncryptionService,
   ) {}
-
+  
   /**
-   * Execute a command on a server via SSH with retry logic
-   * @param serverId Server ID
-   * @param command Command to execute
-   * @param timeout Command timeout in milliseconds (default: 60s)
-   * @returns Command output as string
+   * Execute a command on a server
    */
   async executeCommand(
-    serverId: string, 
+    server: any,
     command: string,
-    timeout: number = 60000,
-  ): Promise<string> {
-    let lastError: Error | null = null;
+    timeout: number = 30000,
+  ): Promise<CommandResult> {
+    try {
+      // Build SSH config from server credentials
+      const config = await this.buildSSHConfig(server, timeout);
+      
+      // Execute command
+      const result = await this.sshService.executeCommand(
+        config,
+        server.id,
+        command,
+      );
+      
+      return {
+        success: result.success,
+        output: result.output,
+        error: result.error,
+        exitCode: result.success ? 0 : 1,
+      };
+    } catch (error: any) {
+      this.logger.error(`Command execution failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        exitCode: 1,
+      };
+    }
+  }
+  
+  /**
+   * Execute multiple commands sequentially
+   */
+  async executeCommands(
+    server: any,
+    commands: string[],
+    timeout: number = 30000,
+  ): Promise<CommandResult[]> {
+    const results: CommandResult[] = [];
     
-    // Truncate command for logging (first 100 chars)
-    const commandPreview = command.length > 100 
-      ? command.substring(0, 100) + '...' 
-      : command;
-    
-    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-      try {
-        // Get server configuration with decrypted credentials
-        const serverConfig = await this.serversService.getServerForConnection(serverId);
-
-        // Prepare SSH config with increased timeout
-        const sshConfig = {
-          host: serverConfig.host,
-          port: serverConfig.port,
-          username: serverConfig.username,
-          privateKey: serverConfig.credentials.privateKey,
-          passphrase: serverConfig.credentials.passphrase,
-          password: serverConfig.credentials.password,
-          timeout: timeout,
-        };
-
-        // Execute command
-        const result = await this.sshConnection.executeCommand(
-          sshConfig,
-          serverId,
-          command,
-        );
-
-        if (!result.success) {
-          const error = result.error || 'SSH command execution failed';
-          
-          // Check if this is a transient error that should be retried
-          if (this.isTransientError(error) && attempt < this.MAX_RETRIES) {
-            this.logger.warn(
-              `Transient SSH error on server ${serverId} (attempt ${attempt}/${this.MAX_RETRIES}): ${error}. Command: ${commandPreview}`,
-            );
-            lastError = new Error(error);
-            
-            // Wait before retry with exponential backoff
-            await this.sleep(this.calculateRetryDelay(attempt));
-            continue;
-          }
-          
-          // Non-transient error or max retries reached
-          this.logger.error(
-            `SSH command failed on server ${serverId} after ${attempt} attempt(s): ${error}. Command: ${commandPreview}`,
-          );
-          throw new Error(error);
-        }
-
-        // Success - log if this was a retry
-        if (attempt > 1) {
-          this.logger.log(
-            `SSH command succeeded on server ${serverId} after ${attempt} attempt(s). Command: ${commandPreview}`,
-          );
-        }
-
-        return result.output || '';
-        
-      } catch (error) {
-        const err = error as Error;
-        lastError = err;
-        
-        // Check if this is a transient error
-        if (this.isTransientError(err.message) && attempt < this.MAX_RETRIES) {
-          this.logger.warn(
-            `Transient SSH error on server ${serverId} (attempt ${attempt}/${this.MAX_RETRIES}): ${err.message}. Command: ${commandPreview}`,
-          );
-          
-          // Wait before retry with exponential backoff
-          await this.sleep(this.calculateRetryDelay(attempt));
-          continue;
-        }
-        
-        // Non-transient error or max retries reached
-        this.logger.error(
-          `Failed to execute SSH command on server ${serverId} after ${attempt} attempt(s): ${err.message}. Command: ${commandPreview}`,
-        );
-        throw err;
+    for (const command of commands) {
+      const result = await this.executeCommand(server, command, timeout);
+      results.push(result);
+      
+      // Stop on first failure
+      if (!result.success) {
+        break;
       }
     }
     
-    // Should never reach here, but just in case
-    throw lastError || new Error('SSH command execution failed after all retries');
+    return results;
   }
-
+  
   /**
-   * Check if an error is transient and should be retried
+   * Check if a file exists on the server
    */
-  private isTransientError(errorMessage: string): boolean {
-    return this.TRANSIENT_ERRORS.some(transientError => 
-      errorMessage.includes(transientError)
-    );
-  }
-
-  /**
-   * Calculate retry delay with exponential backoff
-   */
-  private calculateRetryDelay(attempt: number): number {
-    const delay = Math.min(
-      this.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1),
-      this.MAX_RETRY_DELAY
+  async fileExists(server: any, path: string): Promise<boolean> {
+    const result = await this.executeCommand(
+      server,
+      `test -f "${path}" && echo "exists" || echo "not_found"`,
     );
     
-    // Add jitter to prevent thundering herd
-    const jitter = Math.random() * 0.3 * delay;
-    return delay + jitter;
+    return result.success && result.output?.trim() === 'exists';
   }
-
+  
   /**
-   * Sleep for specified milliseconds
+   * Check if a directory exists on the server
    */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  async directoryExists(server: any, path: string): Promise<boolean> {
+    const result = await this.executeCommand(
+      server,
+      `test -d "${path}" && echo "exists" || echo "not_found"`,
+    );
+    
+    return result.success && result.output?.trim() === 'exists';
+  }
+  
+  /**
+   * Read a file from the server
+   */
+  async readFile(server: any, path: string): Promise<string | null> {
+    const result = await this.executeCommand(server, `cat "${path}"`);
+    
+    if (result.success) {
+      return result.output || null;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Get file permissions
+   */
+  async getFilePermissions(server: any, path: string): Promise<string | null> {
+    const result = await this.executeCommand(
+      server,
+      `stat -c "%a" "${path}" 2>/dev/null || stat -f "%Lp" "${path}"`,
+    );
+    
+    if (result.success) {
+      return result.output?.trim() || null;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Get disk usage for a path
+   */
+  async getDiskUsage(server: any, path: string): Promise<number | null> {
+    const result = await this.executeCommand(
+      server,
+      `df -h "${path}" | tail -1 | awk '{print $5}' | sed 's/%//'`,
+    );
+    
+    if (result.success && result.output) {
+      const usage = parseInt(result.output.trim(), 10);
+      return isNaN(usage) ? null : usage;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Get memory usage
+   */
+  async getMemoryUsage(server: any): Promise<{
+    used: number;
+    total: number;
+    percentage: number;
+  } | null> {
+    const result = await this.executeCommand(
+      server,
+      `free -m | grep Mem | awk '{print $3,$2}'`,
+    );
+    
+    if (result.success && result.output) {
+      const parts = result.output.trim().split(' ');
+      if (parts.length === 2) {
+        const used = parseInt(parts[0], 10);
+        const total = parseInt(parts[1], 10);
+        
+        if (!isNaN(used) && !isNaN(total) && total > 0) {
+          return {
+            used,
+            total,
+            percentage: (used / total) * 100,
+          };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Get CPU usage
+   */
+  async getCPUUsage(server: any): Promise<number | null> {
+    const result = await this.executeCommand(
+      server,
+      `top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'`,
+    );
+    
+    if (result.success && result.output) {
+      const usage = parseFloat(result.output.trim());
+      return isNaN(usage) ? null : usage;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Build SSH configuration from server credentials
+   */
+  private async buildSSHConfig(
+    server: any,
+    timeout: number,
+  ): Promise<SSHConnectionConfig> {
+    const config: SSHConnectionConfig = {
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      timeout,
+    };
+    
+    // Decrypt credentials
+    if (server.privateKey) {
+      config.privateKey = await this.encryptionService.decrypt(server.privateKey);
+      
+      if (server.passphrase) {
+        config.passphrase = await this.encryptionService.decrypt(server.passphrase);
+      }
+    } else if (server.password) {
+      config.password = await this.encryptionService.decrypt(server.password);
+    }
+    
+    return config;
   }
 }

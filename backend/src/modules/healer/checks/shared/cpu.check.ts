@@ -8,10 +8,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckCategory, CheckStatus, RiskLevel, TechStack } from '@prisma/client';
 import { DiagnosticCheckBase } from '../../core/diagnostic-check.base';
 import { CheckResult, DiagnosticCheckMetadata } from '../../core/interfaces';
+import { SSHExecutorService } from '../../services/ssh-executor.service';
 
 @Injectable()
 export class CpuCheck extends DiagnosticCheckBase {
   private readonly logger = new Logger(CpuCheck.name);
+  
+  constructor(private readonly sshExecutor: SSHExecutorService) {
+    super();
+  }
   
   readonly metadata: DiagnosticCheckMetadata = {
     name: 'cpu_usage',
@@ -24,7 +29,14 @@ export class CpuCheck extends DiagnosticCheckBase {
   
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
-      const cpuUsage = await this.getCpuUsage(server);
+      const cpuUsage = await this.sshExecutor.getCPUUsage(server);
+      
+      if (cpuUsage === null) {
+        return this.error(
+          'Failed to retrieve CPU usage information',
+          { error: 'Command execution failed' },
+        );
+      }
       
       if (cpuUsage >= 95) {
         return this.fail(
@@ -54,15 +66,5 @@ export class CpuCheck extends DiagnosticCheckBase {
         { error: error.message },
       );
     }
-  }
-  
-  /**
-   * Get CPU usage percentage
-   * TODO: Implement actual SSH command execution
-   */
-  private async getCpuUsage(server: any): Promise<number> {
-    // Placeholder implementation
-    // Command: top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}'
-    return Math.random() * 100;
   }
 }

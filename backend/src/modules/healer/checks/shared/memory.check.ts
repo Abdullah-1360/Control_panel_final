@@ -8,10 +8,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckCategory, CheckStatus, RiskLevel, TechStack } from '@prisma/client';
 import { DiagnosticCheckBase } from '../../core/diagnostic-check.base';
 import { CheckResult, DiagnosticCheckMetadata } from '../../core/interfaces';
+import { SSHExecutorService } from '../../services/ssh-executor.service';
 
 @Injectable()
 export class MemoryCheck extends DiagnosticCheckBase {
   private readonly logger = new Logger(MemoryCheck.name);
+  
+  constructor(private readonly sshExecutor: SSHExecutorService) {
+    super();
+  }
   
   readonly metadata: DiagnosticCheckMetadata = {
     name: 'memory_usage',
@@ -24,7 +29,15 @@ export class MemoryCheck extends DiagnosticCheckBase {
   
   async execute(application: any, server: any): Promise<CheckResult> {
     try {
-      const memoryInfo = await this.getMemoryInfo(server);
+      const memoryInfo = await this.sshExecutor.getMemoryUsage(server);
+      
+      if (!memoryInfo) {
+        return this.error(
+          'Failed to retrieve memory usage information',
+          { error: 'Command execution failed' },
+        );
+      }
+      
       const { used, total, percentage } = memoryInfo;
       
       if (percentage >= 95) {
@@ -55,23 +68,5 @@ export class MemoryCheck extends DiagnosticCheckBase {
         { error: error.message },
       );
     }
-  }
-  
-  /**
-   * Get memory information from the server
-   * TODO: Implement actual SSH command execution
-   */
-  private async getMemoryInfo(server: any): Promise<{
-    used: number;
-    total: number;
-    percentage: number;
-  }> {
-    // Placeholder implementation
-    // Command: free -m | grep Mem | awk '{print $3,$2}'
-    const total = 8192; // MB
-    const used = Math.floor(Math.random() * total);
-    const percentage = (used / total) * 100;
-    
-    return { used, total, percentage };
   }
 }

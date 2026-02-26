@@ -8,10 +8,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckCategory, CheckStatus, RiskLevel, TechStack } from '@prisma/client';
 import { DiagnosticCheckBase } from '../../core/diagnostic-check.base';
 import { CheckResult, DiagnosticCheckMetadata } from '../../core/interfaces';
+import { SSHExecutorService } from '../../services/ssh-executor.service';
 
 @Injectable()
 export class PermissionsCheck extends DiagnosticCheckBase {
   private readonly logger = new Logger(PermissionsCheck.name);
+  
+  constructor(private readonly sshExecutor: SSHExecutorService) {
+    super();
+  }
   
   readonly metadata: DiagnosticCheckMetadata = {
     name: 'file_permissions',
@@ -58,24 +63,51 @@ export class PermissionsCheck extends DiagnosticCheckBase {
   
   /**
    * Check file and directory permissions
-   * TODO: Implement actual SSH command execution
    */
   private async checkPermissions(server: any, path: string): Promise<{
     critical: string[];
     warnings: string[];
     checked: number;
   }> {
-    // Placeholder implementation
-    // In real implementation, check for:
-    // - World-writable files
-    // - Files owned by wrong user
-    // - Incorrect directory permissions
-    // - Sensitive files with too open permissions
+    const critical: string[] = [];
+    const warnings: string[] = [];
+    let checked = 0;
     
-    return {
-      critical: [],
-      warnings: [],
-      checked: 0,
-    };
+    try {
+      // Check for world-writable files (777, 666)
+      const worldWritableResult = await this.sshExecutor.executeCommand(
+        server,
+        `find "${path}" -type f \\( -perm -002 -o -perm -020 \\) -ls 2>/dev/null | head -20`,
+      );
+      
+      if (worldWritableResult.success && worldWritableResult.output) {
+        const lines = worldWritableResult.output.trim().split('\n').filter(l => l);
+        if (lines.length > 0) {
+          critical.push(`Found ${lines.length} world-writable files`);
+          checked += lines.length;
+        }
+      }
+      
+      // Check for files with overly permissive permissions (755 on sensitive files)
+      const sensitiveFiles = ['.env', 'config.php', 'wp-config.php', 'database.yml', '.htaccess'];
+      for (const file of sensitiveFiles) {
+        const fileExists = await this.sshExecutor.fileExists(server, `${path}/${file}`);
+        if (fileExists) {
+          const perms = await this.sshExecutor.getFilePermissions(server, `${path}/${file}`);
+          if (perms) {
+            checked++;
+            const permNum = parseInt(perms, 10);
+            if (permNum > 644) {
+              warnings.push(`${file} has overly permissive permissions: ${perms}`);
+            }
+          }
+        }
+      }
+      
+    } catch (error) {
+      this.logger.error(`Permission check error: ${error.message}`);
+    }
+    
+    return { critical, warnings, checked };
   }
 }
