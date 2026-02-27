@@ -1,4 +1,4 @@
-import { Server } from '@prisma/client';
+import { servers as Server } from '@prisma/client';
 
 export interface DetectionResult {
   detected: boolean;

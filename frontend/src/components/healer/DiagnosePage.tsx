@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Application, DiagnosticResult } from '@/lib/api/healer';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,49 +21,55 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useDiagnoseApplication } from '@/hooks/use-healer';
+import { useDiagnoseApplication, useDiagnostics } from '@/hooks/use-healer';
 import { useToast } from '@/hooks/use-toast';
 
 interface DiagnosePageProps {
   application: Application;
-  diagnosticResults?: DiagnosticResult[];
   onBack?: () => void;
 }
 
 export function DiagnosePage({ 
-  application, 
-  diagnosticResults = [],
+  application,
   onBack 
 }: DiagnosePageProps) {
   const { toast } = useToast();
   const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<DiagnosticResult[]>(diagnosticResults);
   
   const diagnoseMutation = useDiagnoseApplication();
+  
+  // Fetch existing diagnostics
+  const { data: diagnosticsData, refetch } = useDiagnostics(application.id);
+  const results = diagnosticsData?.results || [];
 
   const handleRunDiagnosis = async () => {
     setIsRunning(true);
     try {
-      const response = await diagnoseMutation.mutateAsync({
+      await diagnoseMutation.mutateAsync({
         id: application.id,
-        data: {
-          categories: ['SYSTEM', 'DATABASE', 'APPLICATION', 'SECURITY', 'PERFORMANCE'],
-        },
+        data: {},
       });
-      
-      setResults(response.results || []);
       
       toast({
-        title: 'Diagnosis Complete',
-        description: `Found ${response.results?.length || 0} check results`,
+        title: 'Diagnosis Started',
+        description: 'Running diagnostic checks...',
       });
+      
+      // Wait a bit then refetch
+      setTimeout(async () => {
+        await refetch();
+        setIsRunning(false);
+        toast({
+          title: 'Diagnosis Complete',
+          description: 'Diagnostic results updated',
+        });
+      }, 2000);
     } catch (error: any) {
       toast({
         title: 'Diagnosis Failed',
         description: error.message || 'Failed to run diagnosis',
         variant: 'destructive',
       });
-    } finally {
       setIsRunning(false);
     }
   };
@@ -74,9 +80,9 @@ export function DiagnosePage({
       acc.total++;
       if (result.status === 'PASS') acc.passed++;
       if (result.status === 'FAIL') acc.failed++;
-      if (result.status === 'WARNING') acc.warnings++;
-      if (result.riskLevel === 'CRITICAL') acc.critical++;
-      if (result.riskLevel === 'HIGH') acc.high++;
+      if (result.status === 'WARN') acc.warnings++;
+      if (result.severity === 'CRITICAL') acc.critical++;
+      if (result.severity === 'HIGH') acc.high++;
       return acc;
     },
     { total: 0, passed: 0, failed: 0, warnings: 0, critical: 0, high: 0 }
@@ -85,13 +91,13 @@ export function DiagnosePage({
   // Transform results to match DiagnosticCheckList format
   const transformedChecks = results.map(result => ({
     checkName: result.checkName,
-    category: result.category as any,
+    category: result.checkCategory as any,
     status: result.status as any,
-    severity: result.riskLevel as any,
+    severity: result.severity as any,
     message: result.message,
     details: result.details || {},
     executionTime: result.executionTime,
-    suggestedFix: undefined, // Can be added if backend provides it
+    suggestedFix: result.suggestedFix || undefined,
   }));
 
   return (
@@ -191,7 +197,10 @@ export function DiagnosePage({
 
       {/* Diagnostic Results */}
       {results.length > 0 ? (
-        <DiagnosticCheckList checks={transformedChecks} />
+        <DiagnosticCheckList 
+          checks={transformedChecks} 
+          applicationId={application.id}
+        />
       ) : (
         <Card>
           <CardHeader>

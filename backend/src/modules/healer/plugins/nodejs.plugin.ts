@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { Server } from '@prisma/client';
+import { servers as Server } from '@prisma/client';
+import { SSHExecutorService } from '../services/ssh-executor.service';
 import {
   IStackPlugin,
   DetectionResult,
   DiagnosticCheckResult,
   HealingAction,
 } from '../interfaces/stack-plugin.interface';
-import { SSHExecutorService } from '../services/ssh-executor.service';
 
 @Injectable()
 export class NodeJsPlugin implements IStackPlugin {
@@ -14,31 +14,39 @@ export class NodeJsPlugin implements IStackPlugin {
   version = '1.0.0';
   supportedVersions = ['18.x', '20.x', '22.x'];
 
-  constructor(private readonly sshExecutor: SSHExecutorService) {}
+  constructor(protected readonly sshExecutor: SSHExecutorService) {}
 
   async detect(server: Server, path: string): Promise<DetectionResult> {
     try {
       // Check for package.json
-      await this.sshExecutor.executeCommand(server, `[ -f "${path}/package.json" ]`);
+      await this.sshExecutor.executeCommand(server.id, `[ -f "${path}/package.json" ]`);
       
-      // Read package.json
+      // Read package.json to verify it's not WordPress or other framework
       const packageJsonContent = await this.sshExecutor.executeCommand(
-        server,
+        server.id,
         `cat ${path}/package.json`,
       );
+      
       const packageJson = JSON.parse(packageJsonContent);
       
-      // Exclude if it's Next.js or Express
-      if (packageJson.dependencies?.next || packageJson.dependencies?.express) {
+      // Exclude if it's a WordPress, Next.js, or other specific framework
+      if (packageJson.dependencies?.wordpress || 
+          packageJson.dependencies?.next ||
+          packageJson.name?.includes('wordpress')) {
         return { detected: false, confidence: 0 };
       }
       
-      // Get Node.js version
-      const versionOutput = await this.sshExecutor.executeCommand(
-        server,
-        'node --version',
-      );
-      const version = versionOutput.trim().replace(/^v/, '');
+      // Try to get Node.js version
+      let version = 'unknown';
+      try {
+        const nodeVersion = await this.sshExecutor.executeCommand(
+          server.id,
+          `cd ${path} && node --version`,
+        );
+        version = nodeVersion.trim().replace('v', '');
+      } catch {
+        // Keep version as 'unknown'
+      }
       
       return {
         detected: true,
@@ -47,10 +55,12 @@ export class NodeJsPlugin implements IStackPlugin {
         confidence: 0.90,
         metadata: {
           packageName: packageJson.name,
-          hasNodeModules: await this.checkNodeModules(server, path),
+          hasExpress: !!packageJson.dependencies?.express,
+          hasTypeScript: !!packageJson.devDependencies?.typescript,
+          engines: packageJson.engines,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       return { detected: false, confidence: 0 };
     }
   }
@@ -59,10 +69,10 @@ export class NodeJsPlugin implements IStackPlugin {
     return [
       'npm_audit',
       'node_version',
-      'package_lock_exists',
-      'node_modules_exists',
-      'env_file_exists',
+      'package_lock',
+      'environment_variables',
       'process_health',
+      'dependencies_outdated',
     ];
   }
 
@@ -79,24 +89,24 @@ export class NodeJsPlugin implements IStackPlugin {
           return await this.checkNpmAudit(application, server, startTime);
         case 'node_version':
           return await this.checkNodeVersion(application, server, startTime);
-        case 'package_lock_exists':
+        case 'package_lock':
           return await this.checkPackageLock(application, server, startTime);
-        case 'node_modules_exists':
-          return await this.checkNodeModules(application, server, startTime);
-        case 'env_file_exists':
-          return await this.checkEnvFile(application, server, startTime);
+        case 'environment_variables':
+          return await this.checkEnvironmentVariables(application, server, startTime);
         case 'process_health':
           return await this.checkProcessHealth(application, server, startTime);
+        case 'dependencies_outdated':
+          return await this.checkDependenciesOutdated(application, server, startTime);
         default:
           throw new Error(`Unknown check: ${checkName}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       return {
         checkName,
         category: 'SYSTEM',
         status: 'ERROR',
         severity: 'MEDIUM',
-        message: `Check failed: ${error.message}`,
+        message: `Check failed: ${error?.message || 'Unknown error'}`,
         executionTime: Date.now() - startTime,
       };
     }
@@ -108,12 +118,12 @@ export class NodeJsPlugin implements IStackPlugin {
     startTime: number,
   ): Promise<DiagnosticCheckResult> {
     try {
-      const auditOutput = await this.sshExecutor.executeCommand(
-        server,
-        `cd ${application.path} && npm audit --json`,
+      const output = await this.sshExecutor.executeCommand(
+        server.id,
+        `cd ${application.path} && npm audit --json 2>/dev/null || echo '{}'`,
       );
       
-      const audit = JSON.parse(auditOutput);
+      const audit = JSON.parse(output || '{}');
       const vulnerabilities = audit.metadata?.vulnerabilities || {};
       const { critical = 0, high = 0, moderate = 0, low = 0 } = vulnerabilities;
       
@@ -124,7 +134,7 @@ export class NodeJsPlugin implements IStackPlugin {
           status: 'FAIL',
           severity: 'CRITICAL',
           message: `${critical} critical vulnerabilities found`,
-          details: { vulnerabilities },
+          details: { vulnerabilities, audit },
           suggestedFix: 'Run: npm audit fix --force',
           executionTime: Date.now() - startTime,
         };
@@ -137,6 +147,19 @@ export class NodeJsPlugin implements IStackPlugin {
           status: 'WARN',
           severity: 'HIGH',
           message: `${high} high severity vulnerabilities found`,
+          details: { vulnerabilities, audit },
+          suggestedFix: 'Run: npm audit fix',
+          executionTime: Date.now() - startTime,
+        };
+      }
+      
+      if (moderate > 0 || low > 0) {
+        return {
+          checkName: 'npm_audit',
+          category: 'SECURITY',
+          status: 'WARN',
+          severity: 'MEDIUM',
+          message: `${moderate + low} vulnerabilities found (moderate/low)`,
           details: { vulnerabilities },
           suggestedFix: 'Run: npm audit fix',
           executionTime: Date.now() - startTime,
@@ -148,17 +171,16 @@ export class NodeJsPlugin implements IStackPlugin {
         category: 'SECURITY',
         status: 'PASS',
         severity: 'LOW',
-        message: 'No critical or high vulnerabilities',
-        details: { vulnerabilities },
+        message: 'No vulnerabilities found',
         executionTime: Date.now() - startTime,
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
         checkName: 'npm_audit',
         category: 'SECURITY',
         status: 'ERROR',
         severity: 'MEDIUM',
-        message: `npm audit failed: ${error.message}`,
+        message: `Failed to run npm audit: ${error?.message || 'Unknown error'}`,
         executionTime: Date.now() - startTime,
       };
     }
@@ -170,19 +192,21 @@ export class NodeJsPlugin implements IStackPlugin {
     startTime: number,
   ): Promise<DiagnosticCheckResult> {
     try {
-      const versionOutput = await this.sshExecutor.executeCommand(
-        server,
-        'node --version',
+      const nodeVersion = await this.sshExecutor.executeCommand(
+        server.id,
+        `cd ${application.path} && node --version`,
       );
-      const version = versionOutput.trim().replace(/^v/, '');
+      
+      const version = nodeVersion.trim().replace('v', '');
       const majorVersion = parseInt(version.split('.')[0]);
       
+      // Check if Node.js version is supported (18, 20, 22 are LTS)
       if (majorVersion < 18) {
         return {
           checkName: 'node_version',
           category: 'SYSTEM',
           status: 'WARN',
-          severity: 'MEDIUM',
+          severity: 'HIGH',
           message: `Node.js ${version} is outdated (< 18.x)`,
           details: { version, majorVersion },
           suggestedFix: 'Upgrade to Node.js 18.x or higher',
@@ -190,22 +214,46 @@ export class NodeJsPlugin implements IStackPlugin {
         };
       }
       
+      // Check package.json engines requirement
+      try {
+        const packageJson = await this.sshExecutor.executeCommand(
+          server.id,
+          `cat ${application.path}/package.json`,
+        );
+        const pkg = JSON.parse(packageJson);
+        
+        if (pkg.engines?.node) {
+          const requiredVersion = pkg.engines.node;
+          return {
+            checkName: 'node_version',
+            category: 'SYSTEM',
+            status: 'PASS',
+            severity: 'LOW',
+            message: `Node.js ${version} (required: ${requiredVersion})`,
+            details: { version, requiredVersion },
+            executionTime: Date.now() - startTime,
+          };
+        }
+      } catch {
+        // Ignore if can't read package.json
+      }
+      
       return {
         checkName: 'node_version',
         category: 'SYSTEM',
         status: 'PASS',
         severity: 'LOW',
-        message: `Node.js ${version} is up to date`,
+        message: `Node.js ${version}`,
         details: { version, majorVersion },
         executionTime: Date.now() - startTime,
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
         checkName: 'node_version',
         category: 'SYSTEM',
         status: 'ERROR',
         severity: 'MEDIUM',
-        message: `Failed to check Node.js version: ${error.message}`,
+        message: `Failed to check Node.js version: ${error?.message || 'Unknown error'}`,
         executionTime: Date.now() - startTime,
       };
     }
@@ -217,23 +265,42 @@ export class NodeJsPlugin implements IStackPlugin {
     startTime: number,
   ): Promise<DiagnosticCheckResult> {
     try {
+      // Check if package-lock.json exists
       await this.sshExecutor.executeCommand(
-        server,
+        server.id,
         `[ -f "${application.path}/package-lock.json" ]`,
       );
       
+      // Check if package-lock.json is in sync with package.json
+      try {
+        await this.sshExecutor.executeCommand(
+          server.id,
+          `cd ${application.path} && npm ls --depth=0 >/dev/null 2>&1`,
+        );
+        
+        return {
+          checkName: 'package_lock',
+          category: 'DEPENDENCIES',
+          status: 'PASS',
+          severity: 'LOW',
+          message: 'package-lock.json is in sync',
+          executionTime: Date.now() - startTime,
+        };
+      } catch {
+        return {
+          checkName: 'package_lock',
+          category: 'DEPENDENCIES',
+          status: 'WARN',
+          severity: 'MEDIUM',
+          message: 'package-lock.json is out of sync with package.json',
+          suggestedFix: 'Run: npm install',
+          executionTime: Date.now() - startTime,
+        };
+      }
+    } catch (error: any) {
       return {
-        checkName: 'package_lock_exists',
-        category: 'CONFIGURATION',
-        status: 'PASS',
-        severity: 'LOW',
-        message: 'package-lock.json exists',
-        executionTime: Date.now() - startTime,
-      };
-    } catch (error) {
-      return {
-        checkName: 'package_lock_exists',
-        category: 'CONFIGURATION',
+        checkName: 'package_lock',
+        category: 'DEPENDENCIES',
         status: 'WARN',
         severity: 'LOW',
         message: 'package-lock.json not found',
@@ -243,65 +310,63 @@ export class NodeJsPlugin implements IStackPlugin {
     }
   }
 
-  private async checkNodeModules(
+  private async checkEnvironmentVariables(
     application: any,
     server: Server,
     startTime: number,
   ): Promise<DiagnosticCheckResult> {
     try {
-      await this.sshExecutor.executeCommand(
-        server,
-        `[ -d "${application.path}/node_modules" ]`,
+      // Check if .env file exists
+      const hasEnv = await this.sshExecutor.executeCommand(
+        server.id,
+        `[ -f "${application.path}/.env" ] && echo "exists" || echo "missing"`,
       );
       
-      return {
-        checkName: 'node_modules_exists',
-        category: 'DEPENDENCIES',
-        status: 'PASS',
-        severity: 'LOW',
-        message: 'node_modules directory exists',
-        executionTime: Date.now() - startTime,
-      };
-    } catch (error) {
-      return {
-        checkName: 'node_modules_exists',
-        category: 'DEPENDENCIES',
-        status: 'FAIL',
-        severity: 'HIGH',
-        message: 'node_modules directory not found',
-        suggestedFix: 'Run: npm install',
-        executionTime: Date.now() - startTime,
-      };
-    }
-  }
-
-  private async checkEnvFile(
-    application: any,
-    server: Server,
-    startTime: number,
-  ): Promise<DiagnosticCheckResult> {
-    try {
-      await this.sshExecutor.executeCommand(
-        server,
-        `[ -f "${application.path}/.env" ]`,
-      );
+      if (hasEnv.trim() === 'missing') {
+        // Check if .env.example exists
+        const hasEnvExample = await this.sshExecutor.executeCommand(
+          server.id,
+          `[ -f "${application.path}/.env.example" ] && echo "exists" || echo "missing"`,
+        );
+        
+        if (hasEnvExample.trim() === 'exists') {
+          return {
+            checkName: 'environment_variables',
+            category: 'CONFIGURATION',
+            status: 'WARN',
+            severity: 'HIGH',
+            message: '.env file missing but .env.example exists',
+            suggestedFix: 'Copy .env.example to .env and configure',
+            executionTime: Date.now() - startTime,
+          };
+        }
+        
+        return {
+          checkName: 'environment_variables',
+          category: 'CONFIGURATION',
+          status: 'WARN',
+          severity: 'MEDIUM',
+          message: '.env file not found',
+          suggestedFix: 'Create .env file with required environment variables',
+          executionTime: Date.now() - startTime,
+        };
+      }
       
       return {
-        checkName: 'env_file_exists',
+        checkName: 'environment_variables',
         category: 'CONFIGURATION',
         status: 'PASS',
         severity: 'LOW',
         message: '.env file exists',
         executionTime: Date.now() - startTime,
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
-        checkName: 'env_file_exists',
+        checkName: 'environment_variables',
         category: 'CONFIGURATION',
-        status: 'WARN',
-        severity: 'MEDIUM',
-        message: '.env file not found',
-        suggestedFix: 'Create .env file with required environment variables',
+        status: 'ERROR',
+        severity: 'LOW',
+        message: `Failed to check environment variables: ${error?.message || 'Unknown error'}`,
         executionTime: Date.now() - startTime,
       };
     }
@@ -313,20 +378,35 @@ export class NodeJsPlugin implements IStackPlugin {
     startTime: number,
   ): Promise<DiagnosticCheckResult> {
     try {
-      // Check if any Node.js process is running for this application
+      // Try to find Node.js process for this application
       const processCheck = await this.sshExecutor.executeCommand(
-        server,
-        `ps aux | grep "node" | grep "${application.path}" | grep -v grep || true`,
+        server.id,
+        `ps aux | grep "node.*${application.path}" | grep -v grep | wc -l`,
       );
       
-      if (processCheck.trim()) {
+      const processCount = parseInt(processCheck.trim());
+      
+      if (processCount === 0) {
         return {
           checkName: 'process_health',
           category: 'SYSTEM',
-          status: 'PASS',
-          severity: 'LOW',
-          message: 'Node.js process is running',
-          details: { process: processCheck.trim() },
+          status: 'WARN',
+          severity: 'HIGH',
+          message: 'No Node.js process found for this application',
+          suggestedFix: 'Start the application using pm2 or systemd',
+          executionTime: Date.now() - startTime,
+        };
+      }
+      
+      if (processCount > 1) {
+        return {
+          checkName: 'process_health',
+          category: 'SYSTEM',
+          status: 'WARN',
+          severity: 'MEDIUM',
+          message: `Multiple Node.js processes found: ${processCount}`,
+          details: { processCount },
+          suggestedFix: 'Check for duplicate processes',
           executionTime: Date.now() - startTime,
         };
       }
@@ -334,19 +414,79 @@ export class NodeJsPlugin implements IStackPlugin {
       return {
         checkName: 'process_health',
         category: 'SYSTEM',
-        status: 'WARN',
-        severity: 'MEDIUM',
-        message: 'No Node.js process found running',
-        suggestedFix: 'Start the application with npm start or pm2',
+        status: 'PASS',
+        severity: 'LOW',
+        message: 'Node.js process is running',
+        details: { processCount },
         executionTime: Date.now() - startTime,
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
         checkName: 'process_health',
         category: 'SYSTEM',
         status: 'ERROR',
         severity: 'MEDIUM',
-        message: `Failed to check process health: ${error.message}`,
+        message: `Failed to check process health: ${error?.message || 'Unknown error'}`,
+        executionTime: Date.now() - startTime,
+      };
+    }
+  }
+
+  private async checkDependenciesOutdated(
+    application: any,
+    server: Server,
+    startTime: number,
+  ): Promise<DiagnosticCheckResult> {
+    try {
+      const output = await this.sshExecutor.executeCommand(
+        server.id,
+        `cd ${application.path} && npm outdated --json 2>/dev/null || echo '{}'`,
+      );
+      
+      const outdated = JSON.parse(output || '{}');
+      const outdatedCount = Object.keys(outdated).length;
+      
+      if (outdatedCount > 10) {
+        return {
+          checkName: 'dependencies_outdated',
+          category: 'DEPENDENCIES',
+          status: 'WARN',
+          severity: 'MEDIUM',
+          message: `${outdatedCount} outdated dependencies`,
+          details: { outdatedCount, packages: Object.keys(outdated) },
+          suggestedFix: 'Run: npm update',
+          executionTime: Date.now() - startTime,
+        };
+      }
+      
+      if (outdatedCount > 0) {
+        return {
+          checkName: 'dependencies_outdated',
+          category: 'DEPENDENCIES',
+          status: 'WARN',
+          severity: 'LOW',
+          message: `${outdatedCount} outdated dependencies`,
+          details: { outdatedCount, packages: Object.keys(outdated) },
+          suggestedFix: 'Run: npm update',
+          executionTime: Date.now() - startTime,
+        };
+      }
+      
+      return {
+        checkName: 'dependencies_outdated',
+        category: 'DEPENDENCIES',
+        status: 'PASS',
+        severity: 'LOW',
+        message: 'All dependencies are up to date',
+        executionTime: Date.now() - startTime,
+      };
+    } catch (error: any) {
+      return {
+        checkName: 'dependencies_outdated',
+        category: 'DEPENDENCIES',
+        status: 'ERROR',
+        severity: 'LOW',
+        message: `Failed to check outdated dependencies: ${error?.message || 'Unknown error'}`,
         executionTime: Date.now() - startTime,
       };
     }
@@ -356,30 +496,62 @@ export class NodeJsPlugin implements IStackPlugin {
     return [
       {
         name: 'npm_install',
-        description: 'Install npm dependencies',
+        description: 'Install/update npm dependencies',
         commands: ['cd {{path}} && npm install'],
-        requiresBackup: false,
-        estimatedDuration: 60,
-        riskLevel: 'LOW',
+        requiresBackup: true,
+        estimatedDuration: 120,
+        riskLevel: 'MEDIUM',
       },
       {
         name: 'npm_audit_fix',
         description: 'Fix npm security vulnerabilities',
         commands: ['cd {{path}} && npm audit fix'],
         requiresBackup: true,
-        estimatedDuration: 30,
+        estimatedDuration: 60,
         riskLevel: 'MEDIUM',
       },
       {
+        name: 'npm_audit_fix_force',
+        description: 'Force fix npm security vulnerabilities',
+        commands: ['cd {{path}} && npm audit fix --force'],
+        requiresBackup: true,
+        estimatedDuration: 90,
+        riskLevel: 'HIGH',
+      },
+      {
         name: 'clear_node_modules',
-        description: 'Clear and reinstall node_modules',
+        description: 'Clear node_modules and reinstall',
         commands: [
           'cd {{path}} && rm -rf node_modules',
           'cd {{path}} && npm install',
         ],
-        requiresBackup: false,
-        estimatedDuration: 90,
+        requiresBackup: true,
+        estimatedDuration: 180,
         riskLevel: 'MEDIUM',
+      },
+      {
+        name: 'npm_update',
+        description: 'Update npm dependencies',
+        commands: ['cd {{path}} && npm update'],
+        requiresBackup: true,
+        estimatedDuration: 120,
+        riskLevel: 'MEDIUM',
+      },
+      {
+        name: 'restart_process',
+        description: 'Restart Node.js process (pm2)',
+        commands: ['cd {{path}} && pm2 restart all || pm2 start npm --name "app" -- start'],
+        requiresBackup: false,
+        estimatedDuration: 10,
+        riskLevel: 'LOW',
+      },
+      {
+        name: 'create_env_from_example',
+        description: 'Create .env from .env.example',
+        commands: ['cd {{path}} && cp .env.example .env'],
+        requiresBackup: false,
+        estimatedDuration: 5,
+        riskLevel: 'LOW',
       },
     ];
   }
@@ -398,8 +570,8 @@ export class NodeJsPlugin implements IStackPlugin {
       const results: string[] = [];
       
       for (const command of action.commands) {
-        const actualCommand = command.replace('{{path}}', application.path);
-        const output = await this.sshExecutor.executeCommand(server, actualCommand);
+        const actualCommand = command.replace(/\{\{path\}\}/g, application.path);
+        const output = await this.sshExecutor.executeCommand(server.id, actualCommand);
         results.push(output);
       }
       
@@ -408,21 +580,12 @@ export class NodeJsPlugin implements IStackPlugin {
         message: `Successfully executed ${action.description}`,
         details: { results },
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
-        message: `Failed to execute ${action.description}: ${error.message}`,
-        details: { error: error.message },
+        message: `Failed to execute ${action.description}: ${error?.message || 'Unknown error'}`,
+        details: { error: error?.message || 'Unknown error' },
       };
-    }
-  }
-
-  private async checkNodeModules(server: Server, path: string): Promise<boolean> {
-    try {
-      await this.sshExecutor.executeCommand(server, `[ -d "${path}/node_modules" ]`);
-      return true;
-    } catch {
-      return false;
     }
   }
 }

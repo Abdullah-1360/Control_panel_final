@@ -77,7 +77,7 @@ export function DashboardSidebar({ currentView, onViewChange, collapsed, onToggl
     { id: "monitoring" as View, label: "Monitoring", icon: Activity, dot: true },
     { id: "firewall" as View, label: "Firewall", icon: Shield },
     { id: "integrations" as View, label: "Integrations", icon: Plug },
-    { id: "healer" as View, label: "WP Auto-Healer", icon: Wrench },
+    { id: "healer" as View, label: "Universal Healer", icon: Wrench },
   ]
 
   const secondaryNav = [

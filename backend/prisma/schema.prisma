@@ -1015,6 +1015,7 @@ model applications {
 model diagnostic_results {
   id              String          @id @default(uuid())
   applicationId   String          @map("application_id")
+  subdomain       String?         // NEW: Track which subdomain this diagnostic is for
   checkName       String          @map("check_name")
   checkCategory   CheckCategory   @map("check_category")
   status          CheckStatus
@@ -1028,6 +1029,7 @@ model diagnostic_results {
   applications    applications    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   
   @@index([applicationId])
+  @@index([applicationId, subdomain]) // NEW: Composite index for subdomain filtering
   @@index([checkCategory])
   @@index([status])
   @@index([severity])
@@ -1096,6 +1098,7 @@ model healing_executions_new {
 // ============================================================================
 
 enum TechStack {
+  UNKNOWN     // Not yet detected
   WORDPRESS
   NODEJS
   PHP_GENERIC

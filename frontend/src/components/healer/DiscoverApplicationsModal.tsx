@@ -42,10 +42,11 @@ export function DiscoverApplicationsModal({
   const handleDiscover = async () => {
     if (!serverId) return;
 
+    // If autoDetect is true, don't send techStacks (backend will auto-detect all)
+    // If autoDetect is false, send selected techStacks
     await discoverMutation.mutateAsync({
       serverId,
-      autoDetect,
-      techStacks: selectedTechStacks.length > 0 ? selectedTechStacks : undefined,
+      techStacks: !autoDetect && selectedTechStacks.length > 0 ? selectedTechStacks : undefined,
     });
 
     // Reset and close

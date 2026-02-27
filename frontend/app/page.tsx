@@ -22,6 +22,7 @@ import { AuditLogsView } from "@/components/dashboard/audit-logs-view"
 import { SessionsView } from "@/components/dashboard/sessions-view"
 import IntegrationsPage from '@/app/(dashboard)/integrations/page'
 import { HealerView } from '@/components/healer/HealerView'
+import { UniversalHealerView } from '@/components/healer/UniversalHealerView'
 
 export default function Page() {
   const [currentView, setCurrentView] = useState<View>("overview")
@@ -68,7 +69,7 @@ export default function Page() {
       case "integrations":
         return <IntegrationsPage />
       case "healer":
-        return <HealerView />
+        return <UniversalHealerView />
       case "users":
         return <UsersView />
       case "audit":

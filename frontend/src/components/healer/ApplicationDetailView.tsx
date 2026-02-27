@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 interface ApplicationDetailViewProps {
   application: Application;
   onDiagnose?: () => void;
+  onDiagnoseSubdomain?: (subdomain: string) => void;
   onToggleHealer?: () => void;
   onConfigure?: () => void;
   onDelete?: () => void;
@@ -36,6 +37,7 @@ const TECH_STACK_CONFIG = {
   WORDPRESS: { label: 'WordPress', color: 'bg-blue-100 text-blue-800' },
   NODEJS: { label: 'Node.js', color: 'bg-green-100 text-green-800' },
   PHP: { label: 'PHP', color: 'bg-purple-100 text-purple-800' },
+  PHP_GENERIC: { label: 'PHP (Generic)', color: 'bg-purple-100 text-purple-700' },
   LARAVEL: { label: 'Laravel', color: 'bg-red-100 text-red-800' },
   NEXTJS: { label: 'Next.js', color: 'bg-gray-100 text-gray-800' },
   EXPRESS: { label: 'Express', color: 'bg-yellow-100 text-yellow-800' },
@@ -59,14 +61,24 @@ const HEALING_MODE_CONFIG = {
 export function ApplicationDetailView({
   application,
   onDiagnose,
+  onDiagnoseSubdomain,
   onToggleHealer,
   onConfigure,
   onDelete,
   isLoading,
 }: ApplicationDetailViewProps) {
-  const techStackConfig = TECH_STACK_CONFIG[application.techStack];
-  const healthStatusConfig = HEALTH_STATUS_CONFIG[application.healthStatus];
-  const healingModeConfig = HEALING_MODE_CONFIG[application.healingMode];
+  const techStackConfig = TECH_STACK_CONFIG[application.techStack] || { 
+    label: application.techStack, 
+    color: 'bg-gray-100 text-gray-800' 
+  };
+  const healthStatusConfig = HEALTH_STATUS_CONFIG[application.healthStatus] || {
+    label: application.healthStatus,
+    color: 'bg-gray-100 text-gray-800'
+  };
+  const healingModeConfig = HEALING_MODE_CONFIG[application.healingMode] || {
+    label: application.healingMode,
+    color: 'bg-gray-100 text-gray-800'
+  };
 
   const getHealthScoreColor = (score: number) => {
     if (score >= 90) return 'text-green-600';
@@ -193,31 +205,47 @@ export function ApplicationDetailView({
               <div className="font-medium">{techStackConfig.label}</div>
             </div>
             
-            {application.version && (
+            {application.techStackVersion && (
               <div className="space-y-1">
                 <div className="text-sm text-muted-foreground">Version</div>
-                <div className="font-medium">{application.version}</div>
+                <div className="font-medium">{application.techStackVersion}</div>
               </div>
             )}
             
-            {application.phpVersion && (
+            {application.metadata?.phpVersion && (
               <div className="space-y-1">
                 <div className="text-sm text-muted-foreground">PHP Version</div>
-                <div className="font-medium">{application.phpVersion}</div>
+                <div className="font-medium">{application.metadata.phpVersion}</div>
               </div>
             )}
             
-            {application.dbName && (
+            {application.metadata?.dbName && (
               <div className="space-y-1">
                 <div className="text-sm text-muted-foreground">Database</div>
-                <div className="font-medium">{application.dbName}</div>
+                <div className="font-medium">{application.metadata.dbName}</div>
               </div>
             )}
             
-            {application.dbHost && (
+            {application.metadata?.dbHost && (
               <div className="space-y-1">
                 <div className="text-sm text-muted-foreground">Database Host</div>
-                <div className="font-medium">{application.dbHost}</div>
+                <div className="font-medium">{application.metadata.dbHost}</div>
+              </div>
+            )}
+            
+            {application.metadata?.domainType && (
+              <div className="space-y-1">
+                <div className="text-sm text-muted-foreground">Domain Type</div>
+                <Badge variant="outline" className="capitalize">
+                  {application.metadata.domainType}
+                </Badge>
+              </div>
+            )}
+            
+            {application.metadata?.cPanelUsername && (
+              <div className="space-y-1">
+                <div className="text-sm text-muted-foreground">cPanel User</div>
+                <div className="font-medium">{application.metadata.cPanelUsername}</div>
               </div>
             )}
             
@@ -244,6 +272,66 @@ export function ApplicationDetailView({
           </div>
         </CardContent>
       </Card>
+
+      {/* Related Domains Card (Subdomains, Addons, Parked) */}
+      {application.metadata?.availableSubdomains && application.metadata.availableSubdomains.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              Related Domains
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {application.metadata.availableSubdomains.map((subdomain: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{subdomain.domain}</span>
+                      <Badge 
+                        variant="outline" 
+                        className={cn(
+                          "capitalize",
+                          subdomain.type === 'main' && "bg-blue-50 text-blue-700 border-blue-200",
+                          subdomain.type === 'subdomain' && "bg-purple-50 text-purple-700 border-purple-200",
+                          subdomain.type === 'addon' && "bg-green-50 text-green-700 border-green-200",
+                          subdomain.type === 'parked' && "bg-gray-50 text-gray-700 border-gray-200"
+                        )}
+                      >
+                        {subdomain.type}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <FolderOpen className="h-3 w-3" />
+                      <span>{subdomain.path}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onDiagnoseSubdomain?.(subdomain.domain)}
+                      disabled={isLoading}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Diagnose
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => window.open(`https://${subdomain.domain}`, '_blank')}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Actions Card */}
       <Card>

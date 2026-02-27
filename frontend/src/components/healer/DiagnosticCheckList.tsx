@@ -4,7 +4,9 @@
  * Displays diagnostic check results with categories and risk levels
  */
 
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckResult, CheckStatus, CheckCategory, RiskLevel } from '@/types/healer';
 import { 
@@ -17,14 +19,31 @@ import {
   Zap,
   Activity,
   Settings,
-  Server
+  Server,
+  Wrench
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useHealApplication } from '@/hooks/use-healer';
 
 interface DiagnosticCheckListProps {
   checks: CheckResult[];
+  applicationId?: string;
   showPlaceholder?: boolean;
 }
+
+// Map check names to healing action names
+const CHECK_TO_ACTION_MAP: Record<string, string> = {
+  'npm_audit': 'npm_audit_fix',
+  'composer_audit': 'composer_update',
+  'outdated_dependencies': 'update_dependencies',
+  'security_vulnerabilities': 'fix_vulnerabilities',
+  'file_permissions': 'fix_permissions',
+  'disk_space': 'cleanup_disk',
+  'memory_usage': 'optimize_memory',
+  'php_errors': 'fix_php_errors',
+  'database_connection': 'fix_database',
+  'cache_issues': 'clear_cache',
+};
 
 const STATUS_CONFIG = {
   [CheckStatus.PASS]: {
@@ -106,7 +125,30 @@ const RISK_LEVEL_CONFIG = {
   },
 };
 
-export function DiagnosticCheckList({ checks, showPlaceholder }: DiagnosticCheckListProps) {
+export function DiagnosticCheckList({ checks, applicationId, showPlaceholder }: DiagnosticCheckListProps) {
+  const [healingCheck, setHealingCheck] = useState<string | null>(null);
+  const healMutation = useHealApplication();
+
+  const handleFix = async (checkName: string) => {
+    if (!applicationId) return;
+    
+    const actionName = CHECK_TO_ACTION_MAP[checkName];
+    if (!actionName) {
+      console.warn(`No healing action mapped for check: ${checkName}`);
+      return;
+    }
+
+    setHealingCheck(checkName);
+    try {
+      await healMutation.mutateAsync({
+        id: applicationId,
+        actionName,
+      });
+    } finally {
+      setHealingCheck(null);
+    }
+  };
+
   if (showPlaceholder || checks.length === 0) {
     return (
       <Card>
@@ -197,9 +239,29 @@ export function DiagnosticCheckList({ checks, showPlaceholder }: DiagnosticCheck
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {check.executionTime}ms
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {check.executionTime}ms
+                          </span>
+                          {/* Show Fix button for FAIL or WARN checks that have a mapped action */}
+                          {applicationId && 
+                           (check.status === CheckStatus.FAIL || check.status === CheckStatus.WARN) && 
+                           CHECK_TO_ACTION_MAP[check.checkName] && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleFix(check.checkName)}
+                              disabled={healingCheck === check.checkName}
+                              className="whitespace-nowrap"
+                            >
+                              <Wrench className={cn(
+                                'h-3 w-3 mr-1',
+                                healingCheck === check.checkName && 'animate-spin'
+                              )} />
+                              {healingCheck === check.checkName ? 'Fixing...' : 'Fix'}
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );

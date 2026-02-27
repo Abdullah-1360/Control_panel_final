@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApplications, useDeleteApplication } from '@/hooks/use-healer';
 import { useServers } from '@/hooks/use-servers';
 import { Search, Plus, Server } from 'lucide-react';
@@ -25,6 +25,12 @@ export default function HealerPage() {
   const [techStackFilter, setTechStackFilter] = useState<string>('all');
   const [healthFilter, setHealthFilter] = useState<string>('all');
   const [isDiscoverModalOpen, setIsDiscoverModalOpen] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Fix hydration mismatch by only rendering after mount
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Fetch applications with filters
   const { data: applicationsData, isLoading } = useApplications({
@@ -71,45 +77,47 @@ export default function HealerPage() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by domain..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
+      {/* Filters - Only render after mount to avoid hydration mismatch */}
+      {isMounted && (
+        <div className="flex gap-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by domain..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={techStackFilter} onValueChange={setTechStackFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter by tech stack" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Tech Stacks</SelectItem>
+              {Object.entries(TECH_STACKS).map(([key, config]) => (
+                <SelectItem key={key} value={key}>
+                  {config.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={healthFilter} onValueChange={setHealthFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter by health" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="HEALTHY">Healthy</SelectItem>
+              <SelectItem value="DEGRADED">Degraded</SelectItem>
+              <SelectItem value="DOWN">Down</SelectItem>
+              <SelectItem value="MAINTENANCE">Maintenance</SelectItem>
+              <SelectItem value="HEALING">Healing</SelectItem>
+              <SelectItem value="UNKNOWN">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={techStackFilter} onValueChange={setTechStackFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Filter by tech stack" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Tech Stacks</SelectItem>
-            {Object.entries(TECH_STACKS).map(([key, config]) => (
-              <SelectItem key={key} value={key}>
-                {config.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={healthFilter} onValueChange={setHealthFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Filter by health" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="HEALTHY">Healthy</SelectItem>
-            <SelectItem value="DEGRADED">Degraded</SelectItem>
-            <SelectItem value="DOWN">Down</SelectItem>
-            <SelectItem value="MAINTENANCE">Maintenance</SelectItem>
-            <SelectItem value="HEALING">Healing</SelectItem>
-            <SelectItem value="UNKNOWN">Unknown</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      )}
 
       {/* Applications List */}
       {isLoading ? (

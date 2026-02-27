@@ -4,12 +4,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TechStackBadge } from './TechStackBadge';
 import { HealthScoreCard } from './HealthScoreCard';
-import { Activity, Server, Calendar, Settings, Trash2, Eye } from 'lucide-react';
+import { Activity, Server, Calendar, Settings, Trash2, Eye, Shield, Zap } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
 interface ApplicationCardProps {
   application: Application;
+  onViewDetails?: (id: string) => void;
   onDiagnose: (id: string) => void;
   onConfigure: (id: string) => void;
   onDelete: (id: string) => void;
@@ -17,15 +18,35 @@ interface ApplicationCardProps {
 
 export function ApplicationCard({
   application,
+  onViewDetails,
   onDiagnose,
   onConfigure,
   onDelete,
 }: ApplicationCardProps) {
-  const router = useRouter();
   
   return (
-    <Card className="p-6 hover:shadow-lg transition-shadow">
+    <Card className={cn(
+      "p-6 hover:shadow-lg transition-all duration-200 relative",
+      "border-l-4",
+      {
+        "border-l-green-500": application.healthStatus === 'HEALTHY',
+        "border-l-yellow-500": application.healthStatus === 'DEGRADED',
+        "border-l-red-500": application.healthStatus === 'DOWN',
+        "border-l-blue-500": application.healthStatus === 'HEALING',
+        "border-l-gray-500": application.healthStatus === 'UNKNOWN',
+      }
+    )}>
       <div className="space-y-4">
+        {/* Healer Status Indicator */}
+        {application.isHealerEnabled && (
+          <div className="absolute top-2 right-2">
+            <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs">
+              <Shield className="h-3 w-3" />
+              <span>Protected</span>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
@@ -57,6 +78,9 @@ export function ApplicationCard({
               score={application.healthScore}
               status={application.healthStatus}
               size="sm"
+              className={cn({
+                "animate-pulse": application.healthStatus === 'DOWN'
+              })}
             />
           </div>
         </div>
@@ -95,12 +119,22 @@ export function ApplicationCard({
           </div>
         )}
 
+        {/* Last Activity Timeline */}
+        {application.lastHealedAt && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1">
+              <Zap className="h-3 w-3 text-green-500" />
+              <span>Healed {formatDistanceToNow(new Date(application.lastHealedAt), { addSuffix: true })}</span>
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex gap-2 pt-2 border-t">
           <Button
             size="sm"
             variant="outline"
-            onClick={() => router.push(`/healer/${application.id}`)}
+            onClick={() => onViewDetails?.(application.id)}
             className="flex-1"
           >
             <Eye className="h-4 w-4 mr-2" />

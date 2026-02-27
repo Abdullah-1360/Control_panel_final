@@ -30,6 +30,14 @@ export class PrismaService {
     count: async (args?: any): Promise<number> => 0,
   };
 
+  applications = {
+    findUnique: async (args?: any): Promise<any> => null,
+    findMany: async (args?: any): Promise<any[]> => [],
+    create: async (args?: any): Promise<any> => ({}),
+    update: async (args?: any): Promise<any> => ({}),
+    count: async (args?: any): Promise<number> => 0,
+  };
+
   $transaction = async (callback: any) => {
     return callback(this);
   };

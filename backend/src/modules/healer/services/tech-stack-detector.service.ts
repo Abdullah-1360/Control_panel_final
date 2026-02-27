@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Server } from '@prisma/client';
+import { servers as Server } from '@prisma/client';
 import { SSHExecutorService } from './ssh-executor.service';
 
 export interface DetectionSignature {
@@ -15,7 +15,7 @@ export interface DetectionSignature {
 export class TechStackDetectorService {
   private readonly DETECTION_SIGNATURES: Record<string, DetectionSignature> = {
     WORDPRESS: {
-      files: ['wp-config.php', 'wp-content', 'wp-includes'],
+      files: ['wp-content', 'wp-includes'],
       confidence: 0.95,
       versionFile: 'wp-includes/version.php',
       versionRegex: /\$wp_version = '([^']+)'/,
@@ -47,6 +47,10 @@ export class TechStackDetectorService {
 
   constructor(private readonly sshExecutor: SSHExecutorService) {}
 
+  /**
+   * Detect tech stack using a single SSH connection with comprehensive bash script
+   * This is much faster than multiple SSH connections
+   */
   async detectTechStack(
     server: Server,
     path: string,
@@ -56,177 +60,198 @@ export class TechStackDetectorService {
     confidence: number;
     metadata?: Record<string, any>;
   }> {
-    const results: Array<{
-      techStack: string;
-      version?: string;
-      confidence: number;
-      metadata?: Record<string, any>;
-    }> = [];
+    console.log(`[TechStackDetector] Detecting tech stack for path: ${path}`);
+    
+    // Single SSH connection with comprehensive detection script
+    const detectionScript = `
+#!/bin/bash
+PATH="${path}"
 
-    // Check each signature
-    for (const [stack, signature] of Object.entries(this.DETECTION_SIGNATURES)) {
-      const result = await this.checkSignature(server, path, stack, signature);
-      if (result.confidence > 0) {
-        results.push(result);
+# Output format: KEY=VALUE
+echo "PATH_EXISTS=$([ -d "$PATH" ] && echo "1" || echo "0")"
+
+# WordPress detection
+echo "WP_CONTENT=$([ -d "$PATH/wp-content" ] && echo "1" || echo "0")"
+echo "WP_INCLUDES=$([ -d "$PATH/wp-includes" ] && echo "1" || echo "0")"
+echo "WP_LOGIN=$([ -f "$PATH/wp-login.php" ] && echo "1" || echo "0")"
+echo "WP_ADMIN=$([ -d "$PATH/wp-admin" ] && echo "1" || echo "0")"
+if [ -f "$PATH/wp-includes/version.php" ]; then
+  WP_VERSION=$(grep "wp_version = " "$PATH/wp-includes/version.php" 2>/dev/null | cut -d "'" -f 2)
+  echo "WP_VERSION=$WP_VERSION"
+fi
+
+# Laravel detection
+echo "LARAVEL_ARTISAN=$([ -f "$PATH/artisan" ] && echo "1" || echo "0")"
+echo "COMPOSER_JSON=$([ -f "$PATH/composer.json" ] && echo "1" || echo "0")"
+if [ -f "$PATH/composer.json" ]; then
+  LARAVEL_FRAMEWORK=$(grep -o '"laravel/framework"' "$PATH/composer.json" 2>/dev/null | wc -l)
+  echo "LARAVEL_FRAMEWORK=$LARAVEL_FRAMEWORK"
+fi
+
+# Node.js detection
+echo "PACKAGE_JSON=$([ -f "$PATH/package.json" ] && echo "1" || echo "0")"
+echo "NEXT_CONFIG=$([ -f "$PATH/next.config.js" ] && echo "1" || echo "0")"
+if [ -f "$PATH/package.json" ]; then
+  HAS_NEXT=$(grep -o '"next"' "$PATH/package.json" 2>/dev/null | wc -l)
+  HAS_EXPRESS=$(grep -o '"express"' "$PATH/package.json" 2>/dev/null | wc -l)
+  echo "HAS_NEXT=$HAS_NEXT"
+  echo "HAS_EXPRESS=$HAS_EXPRESS"
+  PACKAGE_NAME=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$PATH/package.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  echo "PACKAGE_NAME=$PACKAGE_NAME"
+fi
+
+# PHP detection
+echo "INDEX_PHP=$([ -f "$PATH/index.php" ] && echo "1" || echo "0")"
+PHP_FILES=$(find "$PATH" -maxdepth 1 -name "*.php" 2>/dev/null | head -1)
+echo "HAS_PHP_FILES=$([ -n "$PHP_FILES" ] && echo "1" || echo "0")"
+
+# Version detection (if needed)
+if command -v node &> /dev/null; then
+  NODE_VERSION=$(cd "$PATH" && node --version 2>/dev/null | sed 's/v//')
+  echo "NODE_VERSION=$NODE_VERSION"
+fi
+
+if command -v php &> /dev/null; then
+  PHP_VERSION=$(php -v 2>/dev/null | head -n 1 | cut -d ' ' -f 2)
+  echo "PHP_VERSION=$PHP_VERSION"
+  
+  if [ -f "$PATH/artisan" ]; then
+    LARAVEL_VERSION=$(cd "$PATH" && php artisan --version 2>/dev/null | grep -oP 'Laravel Framework \K[\d.]+')
+    echo "LARAVEL_VERSION=$LARAVEL_VERSION"
+  fi
+fi
+`;
+
+    try {
+      const result = await this.sshExecutor.executeCommand(server.id, detectionScript);
+      
+      // Parse the output
+      const data: Record<string, string> = {};
+      result.split('\n').forEach(line => {
+        const [key, value] = line.split('=');
+        if (key && value !== undefined) {
+          data[key.trim()] = value.trim();
+        }
+      });
+
+      console.log(`[TechStackDetector] Detection data:`, data);
+
+      // Check if path exists
+      if (data.PATH_EXISTS !== '1') {
+        console.log(`[TechStackDetector] Directory does not exist: ${path}`);
+        return { techStack: 'UNKNOWN', confidence: 0 };
       }
-    }
 
-    // Sort by confidence and return highest
-    results.sort((a, b) => b.confidence - a.confidence);
+      // WordPress detection (highest priority)
+      if (data.WP_CONTENT === '1' && data.WP_INCLUDES === '1' && 
+          (data.WP_LOGIN === '1' || data.WP_ADMIN === '1')) {
+        console.log(`[TechStackDetector] Detected WORDPRESS with confidence 0.95`);
+        return {
+          techStack: 'WORDPRESS',
+          version: data.WP_VERSION || undefined,
+          confidence: 0.95,
+          metadata: { 
+            phpVersion: data.PHP_VERSION,
+            detectionMethod: 'single-script' 
+          },
+        };
+      }
 
-    if (results.length === 0) {
+      // Laravel detection
+      if (data.LARAVEL_ARTISAN === '1' && data.COMPOSER_JSON === '1' && 
+          parseInt(data.LARAVEL_FRAMEWORK || '0') > 0) {
+        console.log(`[TechStackDetector] Detected LARAVEL with confidence 0.95`);
+        return {
+          techStack: 'LARAVEL',
+          version: data.LARAVEL_VERSION || undefined,
+          confidence: 0.95,
+          metadata: { 
+            phpVersion: data.PHP_VERSION,
+            detectionMethod: 'single-script' 
+          },
+        };
+      }
+
+      // Next.js detection
+      if (data.PACKAGE_JSON === '1' && 
+          (data.NEXT_CONFIG === '1' || parseInt(data.HAS_NEXT || '0') > 0)) {
+        console.log(`[TechStackDetector] Detected NEXTJS with confidence 0.95`);
+        return {
+          techStack: 'NEXTJS',
+          version: data.NODE_VERSION || undefined,
+          confidence: 0.95,
+          metadata: { 
+            packageName: data.PACKAGE_NAME,
+            detectionMethod: 'single-script' 
+          },
+        };
+      }
+
+      // Express detection
+      if (data.PACKAGE_JSON === '1' && parseInt(data.HAS_EXPRESS || '0') > 0 && 
+          parseInt(data.HAS_NEXT || '0') === 0) {
+        console.log(`[TechStackDetector] Detected EXPRESS with confidence 0.85`);
+        return {
+          techStack: 'EXPRESS',
+          version: data.NODE_VERSION || undefined,
+          confidence: 0.85,
+          metadata: { 
+            packageName: data.PACKAGE_NAME,
+            detectionMethod: 'single-script' 
+          },
+        };
+      }
+
+      // Generic Node.js detection
+      if (data.PACKAGE_JSON === '1' && 
+          parseInt(data.HAS_NEXT || '0') === 0 && 
+          parseInt(data.HAS_EXPRESS || '0') === 0) {
+        console.log(`[TechStackDetector] Detected NODEJS with confidence 0.90`);
+        return {
+          techStack: 'NODEJS',
+          version: data.NODE_VERSION || undefined,
+          confidence: 0.90,
+          metadata: { 
+            packageName: data.PACKAGE_NAME,
+            detectionMethod: 'single-script' 
+          },
+        };
+      }
+
+      // Generic PHP detection
+      if (data.INDEX_PHP === '1' && data.COMPOSER_JSON === '1') {
+        console.log(`[TechStackDetector] Detected PHP_GENERIC with confidence 0.70`);
+        return {
+          techStack: 'PHP_GENERIC',
+          version: data.PHP_VERSION || undefined,
+          confidence: 0.70,
+          metadata: { detectionMethod: 'single-script' },
+        };
+      }
+
+      // Fallback: Any PHP files
+      if (data.HAS_PHP_FILES === '1') {
+        console.log(`[TechStackDetector] Found PHP files, marking as PHP_GENERIC`);
+        return {
+          techStack: 'PHP_GENERIC',
+          version: data.PHP_VERSION || undefined,
+          confidence: 0.5,
+          metadata: { detectionMethod: 'fallback' },
+        };
+      }
+
+      console.log(`[TechStackDetector] No tech stack detected for path: ${path}`);
       return {
         techStack: 'UNKNOWN',
         confidence: 0,
       };
-    }
-
-    return results[0];
-  }
-
-  private async checkSignature(
-    server: Server,
-    path: string,
-    techStack: string,
-    signature: DetectionSignature,
-  ): Promise<{
-    techStack: string;
-    version?: string;
-    confidence: number;
-    metadata?: Record<string, any>;
-  }> {
-    try {
-      // Check for required files
-      if (signature.files) {
-        const filesExist = await this.checkFilesExist(server, path, signature.files);
-        if (!filesExist) {
-          return { techStack, confidence: 0 };
-        }
-      }
-
-      // Get version if possible
-      let version: string | undefined;
-      const metadata: Record<string, any> = {};
-
-      if (signature.versionCommand) {
-        try {
-          const versionOutput = await this.sshExecutor.executeCommand(
-            server,
-            `cd ${path} && ${signature.versionCommand}`,
-          );
-          
-          if (signature.versionRegex) {
-            const match = versionOutput.match(signature.versionRegex);
-            version = match ? match[1] : undefined;
-          } else {
-            version = versionOutput.trim().replace(/^v/, '');
-          }
-        } catch (error) {
-          // Version detection failed, but file exists
-        }
-      }
-
-      if (signature.versionFile) {
-        try {
-          const fileContent = await this.sshExecutor.executeCommand(
-            server,
-            `cat ${path}/${signature.versionFile}`,
-          );
-          
-          if (signature.versionRegex) {
-            const match = fileContent.match(signature.versionRegex);
-            version = match ? match[1] : undefined;
-          }
-        } catch (error) {
-          // Version file not found
-        }
-      }
-
-      // Special checks for specific tech stacks
-      if (techStack === 'NODEJS' || techStack === 'NEXTJS' || techStack === 'EXPRESS') {
-        const packageJson = await this.readPackageJson(server, path);
-        if (packageJson) {
-          metadata.packageName = packageJson.name;
-          
-          // Distinguish between Next.js, Express, and generic Node.js
-          if (techStack === 'NEXTJS' && !packageJson.dependencies?.next) {
-            return { techStack, confidence: 0 };
-          }
-          
-          if (techStack === 'EXPRESS') {
-            if (!packageJson.dependencies?.express || packageJson.dependencies?.next) {
-              return { techStack, confidence: 0 };
-            }
-          }
-          
-          if (techStack === 'NODEJS') {
-            // Generic Node.js - only if not Next.js or Express
-            if (packageJson.dependencies?.next || packageJson.dependencies?.express) {
-              return { techStack, confidence: 0 };
-            }
-          }
-        }
-      }
-
-      if (techStack === 'LARAVEL') {
-        const composerJson = await this.readComposerJson(server, path);
-        if (composerJson && !composerJson.require?.['laravel/framework']) {
-          return { techStack, confidence: 0 };
-        }
-      }
-
+    } catch (error: any) {
+      console.error(`[TechStackDetector] Detection script failed:`, error.message);
       return {
-        techStack,
-        version,
-        confidence: signature.confidence,
-        metadata,
+        techStack: 'UNKNOWN',
+        confidence: 0,
+        metadata: { error: error.message },
       };
-    } catch (error) {
-      return { techStack, confidence: 0 };
-    }
-  }
-
-  private async checkFilesExist(
-    server: Server,
-    path: string,
-    files: string[],
-  ): Promise<boolean> {
-    try {
-      const checkCommands = files.map(file => `[ -e "${path}/${file}" ]`).join(' && ');
-      await this.sshExecutor.executeCommand(server, checkCommands);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  private async readPackageJson(
-    server: Server,
-    path: string,
-  ): Promise<any | null> {
-    try {
-      const content = await this.sshExecutor.executeCommand(
-        server,
-        `cat ${path}/package.json`,
-      );
-      return JSON.parse(content);
-    } catch (error) {
-      return null;
-    }
-  }
-
-  private async readComposerJson(
-    server: Server,
-    path: string,
-  ): Promise<any | null> {
-    try {
-      const content = await this.sshExecutor.executeCommand(
-        server,
-        `cat ${path}/composer.json`,
-      );
-      return JSON.parse(content);
-    } catch (error) {
-      return null;
     }
   }
 }

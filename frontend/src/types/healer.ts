@@ -8,7 +8,7 @@
 export enum TechStack {
   WORDPRESS = 'WORDPRESS',
   NODEJS = 'NODEJS',
-  PHP = 'PHP',
+  PHP_GENERIC = 'PHP_GENERIC',
   LARAVEL = 'LARAVEL',
   NEXTJS = 'NEXTJS',
   EXPRESS = 'EXPRESS',

@@ -22,7 +22,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "metrics:collect": "ts-node scripts/collect-all-metrics.ts"
+    "metrics:collect": "ts-node scripts/collect-all-metrics.ts",
+    "clear-applications": "tsx scripts/clear-applications.ts"
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",

@@ -9,6 +9,11 @@ import { HealingMode, RiskLevel, CheckStatus } from '@prisma/client';
 import { CheckResult, HealingPlan, HealingAction } from '../core/interfaces';
 import { PluginRegistryService } from './plugin-registry.service';
 
+interface HealingPlanItem {
+  check: CheckResult;
+  action: HealingAction;
+}
+
 @Injectable()
 export class HealingStrategyEngineService {
   private readonly logger = new Logger(HealingStrategyEngineService.name);
@@ -17,6 +22,12 @@ export class HealingStrategyEngineService {
   
   /**
    * Determine healing approach based on diagnostic results and healing mode
+   * 
+   * MANUAL mode: Never auto-heal (always require approval)
+   * SEMI_AUTO mode: Auto-heal LOW risk only
+   * FULL_AUTO mode: Auto-heal LOW and MEDIUM risk
+   * 
+   * HIGH and CRITICAL risk always require approval
    */
   async determineHealingPlan(
     application: any,
@@ -33,12 +44,12 @@ export class HealingStrategyEngineService {
       throw new Error(`Plugin for ${application.techStack} not available`);
     }
     
-    // Get healing strategies from the plugin
-    const strategies = plugin.getHealingStrategies();
+    // Get healing actions from the plugin
+    const availableActions = plugin.getHealingActions();
     
     // Filter failed checks
     const failedChecks = diagnosticResults.filter(
-      (result) => result.status === CheckStatus.FAIL,
+      (result) => result.status === CheckStatus.FAIL || result.status === CheckStatus.WARN,
     );
     
     const plan: HealingPlan = {
@@ -49,31 +60,34 @@ export class HealingStrategyEngineService {
     
     // Process each failed check
     for (const check of failedChecks) {
-      // Find a strategy that can handle this check
-      const strategy = strategies.find((s) => s.canHandle(check));
+      // Try to match check to healing action
+      const matchedAction = this.matchCheckToAction(check, availableActions);
       
-      if (!strategy) {
-        this.logger.warn(`No healing strategy found for check: ${check.checkName}`);
+      if (!matchedAction) {
+        // No healing action available for this check
+        this.logger.debug(`No healing action found for check: ${check.checkName}`);
         plan.cannotHeal.push(check);
         continue;
       }
       
-      // Get the healing action
-      const action = strategy.getAction(check);
+      // Determine if this action can be auto-healed based on mode and risk level
+      const canAutoHeal = this.canAutoHeal(healingMode, matchedAction.riskLevel);
       
-      if (!action) {
-        this.logger.warn(`Strategy ${strategy.name} returned no action for check: ${check.checkName}`);
-        plan.cannotHeal.push(check);
-        continue;
-      }
+      const planItem: HealingPlanItem = {
+        check,
+        action: matchedAction,
+      };
       
-      // Determine if this can be auto-healed based on mode and risk level
-      if (this.canAutoHeal(healingMode, action.riskLevel)) {
-        plan.autoHeal.push({ check, action });
-        this.logger.debug(`Auto-heal: ${check.checkName} with ${action.name}`);
+      if (canAutoHeal) {
+        this.logger.debug(
+          `Auto-heal approved: ${matchedAction.name} (risk: ${matchedAction.riskLevel}, mode: ${healingMode})`,
+        );
+        plan.autoHeal.push(planItem);
       } else {
-        plan.requireApproval.push({ check, action });
-        this.logger.debug(`Requires approval: ${check.checkName} with ${action.name}`);
+        this.logger.debug(
+          `Approval required: ${matchedAction.name} (risk: ${matchedAction.riskLevel}, mode: ${healingMode})`,
+        );
+        plan.requireApproval.push(planItem);
       }
     }
     
@@ -85,9 +99,95 @@ export class HealingStrategyEngineService {
   }
   
   /**
-   * Determine if an action can be auto-healed based on mode and risk level
+   * Match a diagnostic check to an appropriate healing action
+   * Uses heuristics based on check name, category, and suggested fix
    */
-  private canAutoHeal(mode: HealingMode, riskLevel: RiskLevel): boolean {
+  private matchCheckToAction(
+    check: CheckResult,
+    availableActions: HealingAction[],
+  ): HealingAction | null {
+    const checkName = check.checkName.toLowerCase();
+    const suggestedFix = (check.suggestedFix || '').toLowerCase();
+    
+    // Try exact name match first
+    for (const action of availableActions) {
+      const actionName = action.name.toLowerCase();
+      
+      // Direct name match (e.g., "npm_audit" check → "npm_audit_fix" action)
+      if (checkName.includes(actionName.replace('_fix', '').replace('_strategy', ''))) {
+        return action;
+      }
+      
+      // Match based on suggested fix
+      if (suggestedFix && suggestedFix.includes(actionName.replace('_', ' '))) {
+        return action;
+      }
+    }
+    
+    // Try category-based matching
+    for (const action of availableActions) {
+      const actionName = action.name.toLowerCase();
+      
+      // Cache-related checks
+      if (checkName.includes('cache') && actionName.includes('cache')) {
+        return action;
+      }
+      
+      // Permission-related checks
+      if (checkName.includes('permission') && actionName.includes('permission')) {
+        return action;
+      }
+      
+      // Database-related checks
+      if (checkName.includes('database') && actionName.includes('database')) {
+        return action;
+      }
+      
+      // Dependency-related checks
+      if (checkName.includes('dependencies') && actionName.includes('update')) {
+        return action;
+      }
+      
+      // Update-related checks
+      if (checkName.includes('update') && actionName.includes('update')) {
+        return action;
+      }
+      
+      // Queue-related checks
+      if (checkName.includes('queue') && actionName.includes('queue')) {
+        return action;
+      }
+      
+      // Process-related checks
+      if (checkName.includes('process') && actionName.includes('restart')) {
+        return action;
+      }
+      
+      // Build-related checks
+      if (checkName.includes('build') && actionName.includes('build')) {
+        return action;
+      }
+    }
+    
+    // No match found
+    return null;
+  }
+  
+  /**
+   * Determine if an action can be auto-healed based on healing mode and risk level
+   * 
+   * MANUAL: Never auto-heal (always require approval)
+   * SEMI_AUTO: Auto-heal LOW risk only
+   * FULL_AUTO: Auto-heal LOW and MEDIUM risk
+   * 
+   * HIGH and CRITICAL risk always require approval
+   */
+  private canAutoHeal(mode: HealingMode, riskLevel: string): boolean {
+    // HIGH and CRITICAL always require approval
+    if (riskLevel === 'HIGH' || riskLevel === 'CRITICAL') {
+      return false;
+    }
+    
     switch (mode) {
       case HealingMode.MANUAL:
         // Never auto-heal in manual mode
@@ -95,11 +195,11 @@ export class HealingStrategyEngineService {
         
       case HealingMode.SEMI_AUTO:
         // Only auto-heal LOW risk actions (SUPERVISED mode)
-        return riskLevel === RiskLevel.LOW;
+        return riskLevel === 'LOW';
         
       case HealingMode.FULL_AUTO:
         // Auto-heal LOW and MEDIUM risk actions (AUTO mode)
-        return riskLevel === RiskLevel.LOW || riskLevel === RiskLevel.MEDIUM;
+        return riskLevel === 'LOW' || riskLevel === 'MEDIUM';
         
       default:
         return false;
@@ -107,51 +207,17 @@ export class HealingStrategyEngineService {
   }
   
   /**
-   * Validate that a healing plan is safe to execute
+   * Generate a summary of the healing plan for logging/display
    */
-  validateHealingPlan(plan: HealingPlan): {
-    isValid: boolean;
-    errors: string[];
-    warnings: string[];
-  } {
-    const errors: string[] = [];
-    const warnings: string[] = [];
+  generatePlanSummary(plan: HealingPlan): string {
+    const autoHealActions = plan.autoHeal.map((item: any) => item.action.name).join(', ');
+    const approvalActions = plan.requireApproval.map((item: any) => item.action.name).join(', ');
+    const cannotHealChecks = plan.cannotHeal.map((check: any) => check.checkName).join(', ');
     
-    // Check for conflicting actions
-    const actionNames = new Set<string>();
-    for (const item of [...plan.autoHeal, ...plan.requireApproval]) {
-      if (actionNames.has(item.action.name)) {
-        errors.push(`Duplicate action: ${item.action.name}`);
-      }
-      actionNames.add(item.action.name);
-    }
-    
-    // Check for high-risk actions in auto-heal
-    const highRiskAutoHeal = plan.autoHeal.filter(
-      (item) => item.action.riskLevel === RiskLevel.HIGH || item.action.riskLevel === RiskLevel.CRITICAL,
-    );
-    
-    if (highRiskAutoHeal.length > 0) {
-      errors.push(
-        `High/Critical risk actions should not be auto-healed: ${highRiskAutoHeal.map((i) => i.action.name).join(', ')}`,
-      );
-    }
-    
-    // Warn about actions requiring backup
-    const backupRequired = [...plan.autoHeal, ...plan.requireApproval].filter(
-      (item) => item.action.requiresBackup,
-    );
-    
-    if (backupRequired.length > 0) {
-      warnings.push(
-        `${backupRequired.length} actions require backup before execution`,
-      );
-    }
-    
-    return {
-      isValid: errors.length === 0,
-      errors,
-      warnings,
-    };
+    return [
+      `Auto-heal (${plan.autoHeal.length}): ${autoHealActions || 'none'}`,
+      `Require approval (${plan.requireApproval.length}): ${approvalActions || 'none'}`,
+      `Cannot heal (${plan.cannotHeal.length}): ${cannotHealChecks || 'none'}`,
+    ].join(' | ');
   }
 }

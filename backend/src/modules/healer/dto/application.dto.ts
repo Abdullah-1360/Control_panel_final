@@ -70,13 +70,18 @@ export class DiscoverApplicationsDto {
   serverId!: string;
 
   @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  paths?: string[];
+
+  @IsArray()
   @IsEnum(TechStack, { each: true })
   @IsOptional()
   techStacks?: TechStack[];
 
   @IsBoolean()
   @IsOptional()
-  autoDetect?: boolean;
+  forceRediscover?: boolean;
 }
 
 export class DiagnoseApplicationDto {
@@ -88,4 +93,52 @@ export class DiagnoseApplicationDto {
   @IsBoolean()
   @IsOptional()
   forceRefresh?: boolean;
+
+  @IsString()
+  @IsOptional()
+  subdomain?: string;
+}
+
+export class HealApplicationDto {
+  @IsString()
+  actionName!: string;
+
+  @IsString()
+  @IsOptional()
+  subdomain?: string;
+}
+
+export class UpdateSubdomainMetadataDto {
+  @IsEnum(TechStack)
+  @IsOptional()
+  techStack?: TechStack;
+
+  @IsString()
+  @IsOptional()
+  version?: string;
+
+  @IsString()
+  @IsOptional()
+  phpVersion?: string;
+
+  @IsNumber()
+  @IsOptional()
+  healthScore?: number;
+
+  @IsString()
+  @IsOptional()
+  healthStatus?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isHealerEnabled?: boolean;
+
+  @IsEnum(HealingMode)
+  @IsOptional()
+  healingMode?: HealingMode;
+}
+
+export class ToggleSubdomainHealerDto {
+  @IsBoolean()
+  enabled!: boolean;
 }

@@ -42,11 +42,18 @@ export function DiscoverApplicationsModal({
   const handleDiscover = async () => {
     if (!serverId) return;
 
-    await discoverMutation.mutateAsync({
+    // Build payload - only include fields that backend expects
+    const payload: any = {
       serverId,
-      autoDetect,
-      techStacks: selectedTechStacks.length > 0 ? selectedTechStacks : undefined,
-    });
+    };
+    
+    // If specific tech stacks selected, include them
+    // Otherwise backend will auto-detect all tech stacks
+    if (!autoDetect && selectedTechStacks.length > 0) {
+      payload.techStacks = selectedTechStacks;
+    }
+
+    await discoverMutation.mutateAsync(payload);
 
     // Reset and close
     setServerId('');

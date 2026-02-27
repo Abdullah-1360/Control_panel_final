@@ -40,7 +40,7 @@ export interface CheckResult {
   status: CheckStatus;
   severity: RiskLevel;
   message: string;
-  details: Record<string, any>;
+  details?: Record<string, any>;
   suggestedFix?: string;
   executionTime: number; // milliseconds
 }

@@ -5,7 +5,7 @@ export interface Application {
   serverId: string;
   domain: string;
   path: string;
-  techStack: 'WORDPRESS' | 'NODEJS' | 'PHP' | 'LARAVEL' | 'NEXTJS' | 'EXPRESS';
+  techStack: 'UNKNOWN' | 'WORDPRESS' | 'NODEJS' | 'PHP' | 'PHP_GENERIC' | 'LARAVEL' | 'NEXTJS' | 'EXPRESS';
   detectionMethod: 'AUTO' | 'MANUAL' | 'HYBRID';
   version?: string;
   phpVersion?: string;
@@ -29,13 +29,13 @@ export interface Application {
 export interface DiagnosticResult {
   id: string;
   applicationId: string;
-  checkId: string;
   checkName: string;
-  category: 'SYSTEM' | 'DATABASE' | 'APPLICATION' | 'SECURITY' | 'PERFORMANCE';
-  status: 'PASS' | 'FAIL' | 'WARNING' | 'SKIPPED';
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  checkCategory: 'SYSTEM' | 'DATABASE' | 'APPLICATION' | 'SECURITY' | 'PERFORMANCE' | 'CONFIGURATION' | 'DEPENDENCIES';
+  status: 'PASS' | 'FAIL' | 'WARN' | 'ERROR' | 'SKIPPED';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   message: string;
   details?: any;
+  suggestedFix?: string | null;
   executionTime: number;
   createdAt: string;
 }
@@ -68,13 +68,11 @@ export const healerApi = {
     if (params?.healthStatus) queryParams.append('healthStatus', params.healthStatus);
     if (params?.serverId) queryParams.append('serverId', params.serverId);
 
-    const response = await apiClient.get(`/healer/applications?${queryParams}`);
-    return response.data;
+    return await apiClient.get(`/healer/applications?${queryParams}`);
   },
 
   getApplication: async (id: string): Promise<Application> => {
-    const response = await apiClient.get(`/healer/applications/${id}`);
-    return response.data;
+    return await apiClient.get(`/healer/applications/${id}`);
   },
 
   createApplication: async (data: {
@@ -88,8 +86,7 @@ export const healerApi = {
     dbName?: string;
     dbHost?: string;
   }): Promise<Application> => {
-    const response = await apiClient.post('/healer/applications', data);
-    return response.data;
+    return await apiClient.post('/healer/applications', data);
   },
 
   updateApplication: async (
@@ -104,8 +101,7 @@ export const healerApi = {
       healingMode?: string;
     },
   ): Promise<Application> => {
-    const response = await apiClient.put(`/healer/applications/${id}`, data);
-    return response.data;
+    return await apiClient.put(`/healer/applications/${id}`, data);
   },
 
   deleteApplication: async (id: string): Promise<void> => {
@@ -115,10 +111,24 @@ export const healerApi = {
   discoverApplications: async (data: {
     serverId: string;
     techStacks?: string[];
-    autoDetect?: boolean;
+    paths?: string[];
   }): Promise<{ discovered: number; applications: Application[] }> => {
-    const response = await apiClient.post('/healer/applications/discover', data);
-    return response.data;
+    // Build payload matching backend DTO
+    const payload: any = {
+      serverId: data.serverId,
+    };
+    
+    // Only include techStacks if specified
+    if (data.techStacks && data.techStacks.length > 0) {
+      payload.techStacks = data.techStacks;
+    }
+    
+    // Only include paths if specified
+    if (data.paths && data.paths.length > 0) {
+      payload.paths = data.paths;
+    }
+    
+    return await apiClient.post('/healer/applications/discover', payload);
   },
 
   // Diagnostics
@@ -127,10 +137,10 @@ export const healerApi = {
     data?: {
       checkIds?: string[];
       forceRefresh?: boolean;
+      subdomain?: string;
     },
   ): Promise<{ message: string; applicationId: string }> => {
-    const response = await apiClient.post(`/healer/applications/${id}/diagnose`, data || {});
-    return response.data;
+    return await apiClient.post(`/healer/applications/${id}/diagnose`, data || {});
   },
 
   getDiagnostics: async (
@@ -138,12 +148,56 @@ export const healerApi = {
     limit?: number,
   ): Promise<{ applicationId: string; results: DiagnosticResult[] }> => {
     const queryParams = limit ? `?limit=${limit}` : '';
-    const response = await apiClient.get(`/healer/applications/${id}/diagnostics${queryParams}`);
-    return response.data;
+    return await apiClient.get(`/healer/applications/${id}/diagnostics${queryParams}`);
   },
 
   getHealthScore: async (id: string): Promise<{ applicationId: string; healthScore: number }> => {
-    const response = await apiClient.get(`/healer/applications/${id}/health-score`);
-    return response.data;
+    return await apiClient.get(`/healer/applications/${id}/health-score`);
+  },
+
+  // Healing
+  healApplication: async (
+    id: string,
+    actionName: string,
+  ): Promise<{ applicationId: string; actionName: string; success: boolean; message: string; details?: any }> => {
+    return await apiClient.post(`/healer/applications/${id}/heal`, { actionName });
+  },
+
+  getHealingActions: async (id: string): Promise<{ actions: any[] }> => {
+    // This would come from the plugin, for now we'll handle it in the component
+    return { actions: [] };
+  },
+
+  // Tech Stack Detection
+  detectTechStack: async (id: string): Promise<{
+    techStack: string;
+    version?: string;
+    confidence: number;
+  }> => {
+    return await apiClient.post(`/healer/applications/${id}/detect-tech-stack`, {});
+  },
+
+  detectSubdomainTechStack: async (id: string, subdomain: string): Promise<{
+    techStack: string;
+    version?: string;
+    confidence: number;
+  }> => {
+    return await apiClient.post(`/healer/applications/${id}/subdomains/${subdomain}/detect-tech-stack`, {});
+  },
+
+  detectAllTechStacks: async (id: string): Promise<{
+    main: {
+      techStack: string;
+      version?: string;
+      confidence: number;
+    };
+    subdomains: Array<{
+      domain: string;
+      techStack: string;
+      version?: string;
+      confidence: number;
+    }>;
+  }> => {
+    return await apiClient.post(`/healer/applications/${id}/detect-all-tech-stacks`, {});
   },
 };

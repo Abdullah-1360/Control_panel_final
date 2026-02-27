@@ -7,6 +7,14 @@
 import { TechStack, type TechStackInfo } from '@/types/healer';
 
 export const TECH_STACKS: Record<TechStack, TechStackInfo> = {
+  [TechStack.UNKNOWN]: {
+    value: TechStack.UNKNOWN,
+    label: 'Unknown',
+    icon: 'HelpCircle',
+    color: 'bg-gray-400',
+    isAvailable: true,
+    comingSoon: false,
+  },
   [TechStack.WORDPRESS]: {
     value: TechStack.WORDPRESS,
     label: 'WordPress',
@@ -30,6 +38,14 @@ export const TECH_STACKS: Record<TechStack, TechStackInfo> = {
     color: 'bg-purple-500',
     isAvailable: false,
     comingSoon: true,
+  },
+  [TechStack.PHP_GENERIC]: {
+    value: TechStack.PHP_GENERIC,
+    label: 'PHP (Generic)',
+    icon: 'FileCode',
+    color: 'bg-purple-400',
+    isAvailable: true,
+    comingSoon: false,
   },
   [TechStack.LARAVEL]: {
     value: TechStack.LARAVEL,

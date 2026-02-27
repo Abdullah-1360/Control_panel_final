@@ -58,9 +58,10 @@
       "autoApprove": [
         "execute_command",
         "list_commands",
-        "new_page"
+        "new_page",
+        "list_pages"
       ],
-      "disabled": false
+      "disabled": true
     },
     "postgres": {
       "command": "docker",

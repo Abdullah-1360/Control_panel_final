@@ -3,6 +3,9 @@
  * 
  * Wrapper around SSH connection service for diagnostic checks and healing actions
  * Provides simplified interface for executing commands on remote servers
+ * 
+ * OPTIMIZATION: Implements rate limiting with semaphore to prevent server flooding
+ * Max 5 concurrent SSH connections, 100ms delay between commands
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -17,9 +20,43 @@ export interface CommandResult {
   exitCode?: number;
 }
 
+/**
+ * Semaphore for rate limiting SSH connections
+ * Prevents server flooding by limiting concurrent connections
+ */
+class Semaphore {
+  private queue: Array<() => void> = [];
+  private current = 0;
+  
+  constructor(private max: number) {}
+  
+  async acquire(): Promise<void> {
+    if (this.current < this.max) {
+      this.current++;
+      return;
+    }
+    
+    return new Promise(resolve => {
+      this.queue.push(resolve);
+    });
+  }
+  
+  release(): void {
+    this.current--;
+    const next = this.queue.shift();
+    if (next) {
+      this.current++;
+      next();
+    }
+  }
+}
+
 @Injectable()
 export class SSHExecutorService {
   private readonly logger = new Logger(SSHExecutorService.name);
+  private readonly MAX_CONCURRENT = 5; // Max 5 concurrent SSH connections
+  private readonly DELAY_BETWEEN_COMMANDS = 100; // 100ms delay
+  private semaphore = new Semaphore(this.MAX_CONCURRENT);
   
   constructor(
     private readonly sshService: SSHConnectionService,
@@ -45,13 +82,20 @@ export class SSHExecutorService {
   
   /**
    * Execute a command on a server (returns detailed result)
+   * OPTIMIZED: Uses semaphore to limit concurrent connections and prevent server flooding
    */
   async executeCommandDetailed(
     serverId: string,
     command: string,
     timeout: number = 30000,
   ): Promise<CommandResult> {
+    // Acquire semaphore (wait if 5 connections active)
+    await this.semaphore.acquire();
+    
     try {
+      // Add small delay to prevent flooding
+      await this.delay(this.DELAY_BETWEEN_COMMANDS);
+      
       // Get server from database
       const server = await this.prisma.servers.findUnique({
         where: { id: serverId },
@@ -88,7 +132,17 @@ export class SSHExecutorService {
         error: error.message,
         exitCode: 1,
       };
+    } finally {
+      // Release semaphore
+      this.semaphore.release();
     }
+  }
+  
+  /**
+   * Delay helper for rate limiting
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
   
   /**

@@ -39,6 +39,16 @@ import { ApplicationService } from './services/application.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { TechStackDetectorService } from './services/tech-stack-detector.service';
 import { HealingStrategyEngineService } from './services/healing-strategy-engine.service';
+import { CircuitBreakerService } from './services/circuit-breaker.service';
+import { BackupRollbackService } from './services/backup-rollback.service';
+// Universal Healer: Plugins
+import { NodeJsPlugin } from './plugins/nodejs.plugin';
+import { LaravelPlugin } from './plugins/laravel.plugin';
+import { PhpGenericPlugin } from './plugins/php-generic.plugin';
+import { ExpressPlugin } from './plugins/express.plugin';
+import { NextJsPlugin } from './plugins/nextjs.plugin';
+import { MySQLPlugin } from './plugins/mysql.plugin';
+// import { WordPressPlugin } from './plugins/wordpress.plugin'; // Phase 4: Not needed yet
 // Universal Healer: Controllers
 import { ApplicationController } from './controllers/application.controller';
 
@@ -93,6 +103,16 @@ import { ApplicationController } from './controllers/application.controller';
     PluginRegistryService,
     TechStackDetectorService,
     HealingStrategyEngineService,
+    CircuitBreakerService,
+    BackupRollbackService,
+    // Universal Healer: Plugins
+    NodeJsPlugin,
+    LaravelPlugin,
+    PhpGenericPlugin,
+    ExpressPlugin,
+    NextJsPlugin,
+    MySQLPlugin,
+    // WordPressPlugin, // Phase 4: Not needed yet - WordPress works via /api/v1/healer/sites
   ],
   exports: [HealerService, UnifiedDiagnosisService, ApplicationService],
 })

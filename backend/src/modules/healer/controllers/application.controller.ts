@@ -20,6 +20,9 @@ import {
   UpdateApplicationDto,
   DiscoverApplicationsDto,
   DiagnoseApplicationDto,
+  HealApplicationDto,
+  UpdateSubdomainMetadataDto,
+  ToggleSubdomainHealerDto,
 } from '../dto/application.dto';
 import { TechStack, HealthStatus } from '@prisma/client';
 
@@ -99,8 +102,9 @@ export class ApplicationController {
   async discover(@Body() discoverDto: DiscoverApplicationsDto) {
     return this.applicationService.discover({
       serverId: discoverDto.serverId,
+      paths: discoverDto.paths,
       techStacks: discoverDto.techStacks,
-      autoDetect: discoverDto.autoDetect ?? true,
+      forceRediscover: discoverDto.forceRediscover,
     });
   }
 
@@ -113,12 +117,7 @@ export class ApplicationController {
     @Param('id') id: string,
     @Body() diagnoseDto: DiagnoseApplicationDto,
   ) {
-    // This will be implemented when diagnostic checks are ready
-    return {
-      message: 'Diagnosis started',
-      applicationId: id,
-      checkIds: diagnoseDto.checkIds,
-    };
+    return this.applicationService.diagnose(id, diagnoseDto.subdomain);
   }
 
   /**
@@ -130,11 +129,11 @@ export class ApplicationController {
     @Param('id') id: string,
     @Query('limit') limit?: string,
   ) {
-    // This will be implemented when diagnostic results are ready
-    return {
-      applicationId: id,
-      results: [],
-    };
+    const results = await this.applicationService.getDiagnosticResults(
+      id,
+      limit ? parseInt(limit, 10) : 50,
+    );
+    return { applicationId: id, results };
   }
 
   /**
@@ -145,5 +144,101 @@ export class ApplicationController {
   async getHealthScore(@Param('id') id: string) {
     const score = await this.applicationService.calculateHealthScore(id);
     return { applicationId: id, healthScore: score };
+  }
+
+  /**
+   * Execute healing action on application
+   */
+  @Post(':id/heal')
+  @RequirePermissions('healer', 'heal')
+  async heal(
+    @Param('id') id: string,
+    @Body() healDto: HealApplicationDto,
+  ) {
+    return this.applicationService.heal(id, healDto.actionName, healDto.subdomain);
+  }
+
+  /**
+   * Collect detailed metadata for application (on-demand)
+   */
+  @Post(':id/collect-metadata')
+  @RequirePermissions('healer', 'read')
+  async collectMetadata(@Param('id') id: string) {
+    await this.applicationService.collectDetailedMetadata(id);
+    return { message: 'Metadata collection completed', applicationId: id };
+  }
+
+  /**
+   * Update subdomain metadata
+   */
+  @Put(':id/subdomains/:domain')
+  @RequirePermissions('healer', 'update')
+  async updateSubdomainMetadata(
+    @Param('id') id: string,
+    @Param('domain') domain: string,
+    @Body() updateDto: UpdateSubdomainMetadataDto,
+  ) {
+    return this.applicationService.updateSubdomainMetadata(id, domain, updateDto);
+  }
+
+  /**
+   * Toggle subdomain healer
+   */
+  @Post(':id/subdomains/:domain/toggle-healer')
+  @RequirePermissions('healer', 'update')
+  async toggleSubdomainHealer(
+    @Param('id') id: string,
+    @Param('domain') domain: string,
+    @Body() toggleDto: ToggleSubdomainHealerDto,
+  ) {
+    return this.applicationService.toggleSubdomainHealer(id, domain, toggleDto.enabled);
+  }
+
+  /**
+   * Get subdomain-specific diagnostics
+   */
+  @Get(':id/subdomains/:domain/diagnostics')
+  @RequirePermissions('healer', 'read')
+  async getSubdomainDiagnostics(
+    @Param('id') id: string,
+    @Param('domain') domain: string,
+    @Query('limit') limit?: string,
+  ) {
+    const results = await this.applicationService.getSubdomainDiagnostics(
+      id,
+      domain,
+      limit ? parseInt(limit, 10) : 50,
+    );
+    return { applicationId: id, subdomain: domain, results };
+  }
+
+  /**
+   * Detect tech stack for application
+   */
+  @Post(':id/detect-tech-stack')
+  @RequirePermissions('healer', 'read')
+  async detectTechStack(@Param('id') id: string) {
+    return this.applicationService.detectTechStack(id);
+  }
+
+  /**
+   * Detect tech stack for subdomain
+   */
+  @Post(':id/subdomains/:domain/detect-tech-stack')
+  @RequirePermissions('healer', 'read')
+  async detectSubdomainTechStack(
+    @Param('id') id: string,
+    @Param('domain') domain: string,
+  ) {
+    return this.applicationService.detectSubdomainTechStack(id, domain);
+  }
+
+  /**
+   * Detect tech stack for application and all subdomains
+   */
+  @Post(':id/detect-all-tech-stacks')
+  @RequirePermissions('healer', 'read')
+  async detectAllTechStacks(@Param('id') id: string) {
+    return this.applicationService.detectAllTechStacks(id);
   }
 }

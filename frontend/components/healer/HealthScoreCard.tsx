@@ -22,6 +22,7 @@ interface HealthScoreCardProps {
   status: HealthStatus;
   lastCheck?: string;
   className?: string;
+  size?: 'sm' | 'md' | 'lg';
 }
 
 const STATUS_CONFIG = {
@@ -73,7 +74,8 @@ export function HealthScoreCard({
   score, 
   status, 
   lastCheck,
-  className 
+  className,
+  size = 'md'
 }: HealthScoreCardProps) {
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
@@ -84,6 +86,22 @@ export function HealthScoreCard({
     if (score >= 40) return 'bg-orange-500';
     return 'bg-red-500';
   };
+  
+  if (size === 'sm') {
+    return (
+      <div className={cn('text-center', className)}>
+        <div className={cn('text-2xl font-bold', {
+          'text-green-600': score && score >= 80,
+          'text-yellow-600': score && score >= 60 && score < 80,
+          'text-red-600': score && score < 60,
+          'text-gray-600': !score
+        })}>
+          {score || 0}
+        </div>
+        <div className="text-xs text-muted-foreground">Health</div>
+      </div>
+    );
+  }
   
   return (
     <div className={cn('space-y-3', className)}>

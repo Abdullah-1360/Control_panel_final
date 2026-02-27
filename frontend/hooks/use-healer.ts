@@ -112,7 +112,10 @@ export function useDiscoverApplications() {
   return useMutation({
     mutationFn: healerApi.discoverApplications,
     onSuccess: (data) => {
+      // Invalidate and refetch applications list
       queryClient.invalidateQueries({ queryKey: healerKeys.applications() });
+      queryClient.refetchQueries({ queryKey: healerKeys.applications() });
+      
       const count = data?.discovered ?? 0;
       toast.success(`Discovered ${count} application(s)`);
     },
@@ -127,15 +130,38 @@ export function useDiagnoseApplication() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data?: any }) =>
-      healerApi.diagnoseApplication(id, data),
+    mutationFn: ({ applicationId, subdomain }: { applicationId: string; subdomain?: string }) =>
+      healerApi.diagnoseApplication(applicationId, { subdomain }),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: healerKeys.diagnostics(variables.id) });
-      queryClient.invalidateQueries({ queryKey: healerKeys.application(variables.id) });
+      queryClient.invalidateQueries({ queryKey: healerKeys.diagnostics(variables.applicationId) });
+      queryClient.invalidateQueries({ queryKey: healerKeys.application(variables.applicationId) });
       toast.success('Diagnosis started');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to start diagnosis');
+    },
+  });
+}
+
+// Heal application
+export function useHealApplication() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, actionName }: { id: string; actionName: string }) =>
+      healerApi.healApplication(id, actionName),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: healerKeys.diagnostics(variables.id) });
+      queryClient.invalidateQueries({ queryKey: healerKeys.application(variables.id) });
+      
+      if (data.success) {
+        toast.success(data.message || 'Healing action completed successfully');
+      } else {
+        toast.error(data.message || 'Healing action failed');
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to execute healing action');
     },
   });
 }

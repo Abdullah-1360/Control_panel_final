@@ -24,6 +24,24 @@ export function TechStackBadge({
   className 
 }: TechStackBadgeProps) {
   const info = getTechStackInfo(techStack);
+  
+  // Fallback for unknown tech stacks
+  if (!info) {
+    return (
+      <Badge 
+        variant="secondary" 
+        className={cn(
+          'flex items-center gap-1.5',
+          sizeClasses[size],
+          className
+        )}
+      >
+        <Icons.HelpCircle className={iconSizes[size]} />
+        <span>{techStack}</span>
+      </Badge>
+    );
+  }
+  
   const Icon = (Icons as any)[info.icon] || Icons.HelpCircle;
   
   const sizeClasses = {

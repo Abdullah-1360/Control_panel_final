@@ -12,6 +12,7 @@ interface ApplicationListProps {
     totalPages: number;
   };
   onPageChange: (page: number) => void;
+  onViewDetails?: (id: string) => void;
   onDiagnose: (id: string) => void;
   onConfigure: (id: string) => void;
   onDelete: (id: string) => void;
@@ -21,6 +22,7 @@ export function ApplicationList({
   applications,
   pagination,
   onPageChange,
+  onViewDetails,
   onDiagnose,
   onConfigure,
   onDelete,
@@ -33,6 +35,7 @@ export function ApplicationList({
           <ApplicationCard
             key={application.id}
             application={application}
+            onViewDetails={onViewDetails}
             onDiagnose={onDiagnose}
             onConfigure={onConfigure}
             onDelete={onDelete}
