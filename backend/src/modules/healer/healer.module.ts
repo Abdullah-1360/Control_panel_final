@@ -34,6 +34,13 @@ import { BackupStatusService } from './services/checks/backup-status.service';
 import { ResourceMonitoringService } from './services/checks/resource-monitoring.service';
 import { PluginThemeAnalysisService } from './services/checks/plugin-theme-analysis.service';
 import { UptimeMonitoringService } from './services/checks/uptime-monitoring.service';
+// Universal Healer: Core Services
+import { ApplicationService } from './services/application.service';
+import { PluginRegistryService } from './services/plugin-registry.service';
+import { TechStackDetectorService } from './services/tech-stack-detector.service';
+import { HealingStrategyEngineService } from './services/healing-strategy-engine.service';
+// Universal Healer: Controllers
+import { ApplicationController } from './controllers/application.controller';
 
 @Module({
   imports: [
@@ -43,7 +50,10 @@ import { UptimeMonitoringService } from './services/checks/uptime-monitoring.ser
       name: 'healer-jobs',
     }),
   ],
-  controllers: [HealerController],
+  controllers: [
+    HealerController,
+    ApplicationController, // Universal Healer
+  ],
   providers: [
     // Stub services (TODO: Remove when actual modules are integrated)
     PrismaService,
@@ -78,7 +88,12 @@ import { UptimeMonitoringService } from './services/checks/uptime-monitoring.ser
     ResourceMonitoringService,
     PluginThemeAnalysisService,
     UptimeMonitoringService,
+    // Universal Healer: Core Services
+    ApplicationService,
+    PluginRegistryService,
+    TechStackDetectorService,
+    HealingStrategyEngineService,
   ],
-  exports: [HealerService, UnifiedDiagnosisService],
+  exports: [HealerService, UnifiedDiagnosisService, ApplicationService],
 })
 export class HealerModule {}

@@ -247,15 +247,15 @@ export class SSHExecutorService {
       timeout,
     };
     
-    // Decrypt credentials
-    if (server.privateKey) {
-      config.privateKey = await this.encryptionService.decrypt(server.privateKey);
+    // Decrypt credentials (use correct field names from database)
+    if (server.encryptedPrivateKey) {
+      config.privateKey = await this.encryptionService.decrypt(server.encryptedPrivateKey);
       
-      if (server.passphrase) {
-        config.passphrase = await this.encryptionService.decrypt(server.passphrase);
+      if (server.encryptedPassphrase) {
+        config.passphrase = await this.encryptionService.decrypt(server.encryptedPassphrase);
       }
-    } else if (server.password) {
-      config.password = await this.encryptionService.decrypt(server.password);
+    } else if (server.encryptedPassword) {
+      config.password = await this.encryptionService.decrypt(server.encryptedPassword);
     }
     
     return config;

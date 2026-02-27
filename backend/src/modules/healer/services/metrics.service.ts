@@ -142,13 +142,13 @@ export class MetricsService {
       // Create metrics record
       await this.prisma.$executeRaw`
         INSERT INTO healer_metrics (
-          id, period_start, period_end, period_type,
-          total_diagnoses, healthy_count, wsod_count, db_error_count, syntax_error_count, other_error_count,
-          total_healings, successful_healings, failed_healings, rolled_back_healings,
-          avg_diagnosis_time, avg_healing_time, avg_verification_score,
-          healing_success_rate, first_attempt_success_rate,
-          patterns_learned, patterns_applied, pattern_success_rate,
-          created_at
+          id, "periodStart", "periodEnd", "periodType",
+          "totalDiagnoses", "healthyCount", "wsodCount", "dbErrorCount", "syntaxErrorCount", "otherErrorCount",
+          "totalHealings", "successfulHealings", "failedHealings", "rolledBackHealings",
+          "avgDiagnosisTime", "avgHealingTime", "avgVerificationScore",
+          "healingSuccessRate", "firstAttemptSuccessRate",
+          "patternsLearned", "patternsApplied", "patternSuccessRate",
+          "createdAt"
         ) VALUES (
           gen_random_uuid(), ${periodStart}, ${periodEnd}, ${periodType},
           ${totalDiagnoses}, ${healthyCount}, ${wsodCount}, ${dbErrorCount}, ${syntaxErrorCount}, ${otherErrorCount},
@@ -224,7 +224,7 @@ export class MetricsService {
     for (const alert of alerts) {
       await this.prisma.$executeRaw`
         INSERT INTO healer_alerts (
-          id, alert_type, severity, title, message, metadata, status, created_at
+          id, "alertType", severity, title, message, metadata, status, "createdAt"
         ) VALUES (
           gen_random_uuid(), ${alert.alertType}, ${alert.severity}, ${alert.title}, 
           ${alert.message}, ${alert.metadata}, 'ACTIVE', NOW()
@@ -240,8 +240,8 @@ export class MetricsService {
   async getMetrics(periodType: string, limit: number = 24): Promise<any[]> {
     const metrics = await this.prisma.$queryRaw`
       SELECT * FROM healer_metrics
-      WHERE period_type = ${periodType}
-      ORDER BY period_start DESC
+      WHERE "periodType" = ${periodType}
+      ORDER BY "periodStart" DESC
       LIMIT ${limit}
     `;
     return metrics as any[];
@@ -261,7 +261,7 @@ export class MetricsService {
           WHEN 'WARNING' THEN 3
           WHEN 'INFO' THEN 4
         END,
-        created_at DESC
+        "createdAt" DESC
       LIMIT 50
     `;
     return alerts as any[];
@@ -274,8 +274,8 @@ export class MetricsService {
     await this.prisma.$executeRaw`
       UPDATE healer_alerts
       SET status = 'ACKNOWLEDGED',
-          acknowledged_by = ${userId},
-          acknowledged_at = NOW()
+          "acknowledgedBy" = ${userId},
+          "acknowledgedAt" = NOW()
       WHERE id = ${alertId}
     `;
   }
@@ -287,7 +287,7 @@ export class MetricsService {
     await this.prisma.$executeRaw`
       UPDATE healer_alerts
       SET status = 'RESOLVED',
-          resolved_at = NOW()
+          "resolvedAt" = NOW()
       WHERE id = ${alertId}
     `;
   }

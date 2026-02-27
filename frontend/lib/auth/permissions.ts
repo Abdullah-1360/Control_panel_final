@@ -46,7 +46,7 @@ export function hasPermission(
 export function usePermission(resource: string, action: string): boolean {
   const { user } = useAuthStore();
   
-  if (!user) {
+  if (!user || !user.role) {
     return false;
   }
 
@@ -111,7 +111,7 @@ function checkRolePermission(roleName: string, resource: string, action: string)
 export function usePermissions(requiredPermissions: Permission[]): boolean {
   const { user } = useAuthStore();
   
-  if (!user) {
+  if (!user || !user.role) {
     return false;
   }
 
@@ -126,7 +126,7 @@ export function usePermissions(requiredPermissions: Permission[]): boolean {
 export function useAnyPermission(requiredPermissions: Permission[]): boolean {
   const { user } = useAuthStore();
   
-  if (!user) {
+  if (!user || !user.role) {
     return false;
   }
 
@@ -140,7 +140,7 @@ export function useAnyPermission(requiredPermissions: Permission[]): boolean {
  */
 export function useRole(roleName: string): boolean {
   const { user } = useAuthStore();
-  return user?.role.name === roleName;
+  return user?.role?.name === roleName;
 }
 
 /**
@@ -148,5 +148,5 @@ export function useRole(roleName: string): boolean {
  */
 export function useAnyRole(roleNames: string[]): boolean {
   const { user } = useAuthStore();
-  return roleNames.includes(user?.role.name || '');
+  return roleNames.includes(user?.role?.name || '');
 }

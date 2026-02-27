@@ -44,6 +44,40 @@ export class HealerController {
   ) {}
 
   /**
+   * GET /api/v1/healer/health
+   * Get healer system health and migration status
+   */
+  @Get('health')
+  async getHealth() {
+    return {
+      data: {
+        wordpress: {
+          status: 'operational',
+          version: '1.0',
+          description: 'WordPress healer fully functional',
+          endpoints: ['/api/v1/healer/sites', '/api/v1/healer/discover'],
+        },
+        universal: {
+          status: 'preview',
+          version: '0.1',
+          description: 'Universal healer in development (Phase 3)',
+          endpoints: ['/api/v1/healer/applications'],
+          supportedTechStacks: ['WORDPRESS'],
+          plannedTechStacks: ['NODEJS', 'PHP_GENERIC', 'LARAVEL', 'NEXTJS', 'EXPRESS'],
+        },
+        migration: {
+          phase: '2.5',
+          status: 'stabilization',
+          nextPhase: '3',
+          nextPhaseEta: '4-6 weeks',
+          description: 'Gradual migration strategy in progress',
+        },
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+
+  /**
    * POST /api/v1/healer/discover
    * Discover WordPress sites on a server
    */

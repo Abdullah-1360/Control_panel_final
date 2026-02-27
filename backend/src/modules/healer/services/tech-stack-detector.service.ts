@@ -1,122 +1,232 @@
-/**
- * Tech Stack Detection Service
- * 
- * Automatically detects the tech stack of an application
- */
+import { Injectable } from '@nestjs/common';
+import { Server } from '@prisma/client';
+import { SSHExecutorService } from './ssh-executor.service';
 
-import { Injectable, Logger } from '@nestjs/common';
-import { TechStack, DetectionMethod } from '@prisma/client';
-import { DetectionResult } from '../core/interfaces';
-import { PluginRegistryService } from './plugin-registry.service';
+export interface DetectionSignature {
+  files?: string[];
+  confidence: number;
+  versionCommand?: string;
+  versionRegex?: RegExp;
+  versionFile?: string;
+  additionalChecks?: (result: any) => boolean;
+}
 
 @Injectable()
 export class TechStackDetectorService {
-  private readonly logger = new Logger(TechStackDetectorService.name);
-  
-  constructor(private readonly pluginRegistry: PluginRegistryService) {}
-  
-  /**
-   * Detect the tech stack of an application
-   * Runs all plugin detectors and returns the highest confidence match
-   */
-  async detect(server: any, path: string): Promise<DetectionResult> {
-    this.logger.log(`Detecting tech stack for ${path} on server ${server.host}`);
-    
-    const plugins = this.pluginRegistry.getAllPlugins();
-    const results: DetectionResult[] = [];
-    
-    // Run all plugin detectors in parallel
-    const detectionPromises = plugins.map(async (plugin) => {
-      try {
-        const result = await plugin.detect(server, path);
-        if (result.detected) {
-          this.logger.debug(
-            `Plugin ${plugin.name} detected ${result.techStack} with ${(result.confidence * 100).toFixed(1)}% confidence`,
-          );
-          return result;
-        }
-        return null;
-      } catch (error: any) {
-        this.logger.error(`Plugin ${plugin.name} detection failed: ${error.message}`);
-        return null;
+  private readonly DETECTION_SIGNATURES: Record<string, DetectionSignature> = {
+    WORDPRESS: {
+      files: ['wp-config.php', 'wp-content', 'wp-includes'],
+      confidence: 0.95,
+      versionFile: 'wp-includes/version.php',
+      versionRegex: /\$wp_version = '([^']+)'/,
+    },
+    NODEJS: {
+      files: ['package.json'],
+      confidence: 0.90,
+      versionCommand: 'node --version',
+    },
+    LARAVEL: {
+      files: ['artisan', 'composer.json'],
+      confidence: 0.95,
+      versionCommand: 'php artisan --version',
+      versionRegex: /Laravel Framework (\d+\.\d+\.\d+)/,
+    },
+    NEXTJS: {
+      files: ['package.json', 'next.config.js'],
+      confidence: 0.95,
+    },
+    EXPRESS: {
+      files: ['package.json'],
+      confidence: 0.85,
+    },
+    PHP_GENERIC: {
+      files: ['index.php', 'composer.json'],
+      confidence: 0.70,
+    },
+  };
+
+  constructor(private readonly sshExecutor: SSHExecutorService) {}
+
+  async detectTechStack(
+    server: Server,
+    path: string,
+  ): Promise<{
+    techStack: string;
+    version?: string;
+    confidence: number;
+    metadata?: Record<string, any>;
+  }> {
+    const results: Array<{
+      techStack: string;
+      version?: string;
+      confidence: number;
+      metadata?: Record<string, any>;
+    }> = [];
+
+    // Check each signature
+    for (const [stack, signature] of Object.entries(this.DETECTION_SIGNATURES)) {
+      const result = await this.checkSignature(server, path, stack, signature);
+      if (result.confidence > 0) {
+        results.push(result);
       }
-    });
-    
-    const detectionResults = await Promise.all(detectionPromises);
-    
-    // Filter out null results
-    const validResults = detectionResults.filter(
-      (result): result is DetectionResult => result !== null,
-    );
-    
-    if (validResults.length === 0) {
-      this.logger.warn(`No tech stack detected for ${path}`);
+    }
+
+    // Sort by confidence and return highest
+    results.sort((a, b) => b.confidence - a.confidence);
+
+    if (results.length === 0) {
       return {
-        detected: false,
+        techStack: 'UNKNOWN',
         confidence: 0,
       };
     }
-    
-    // Sort by confidence (highest first)
-    validResults.sort((a, b) => b.confidence - a.confidence);
-    
-    const bestMatch = validResults[0];
-    
-    this.logger.log(
-      `Detected ${bestMatch.techStack} with ${(bestMatch.confidence * 100).toFixed(1)}% confidence`,
-    );
-    
-    return bestMatch;
+
+    return results[0];
   }
-  
-  /**
-   * Detect tech stack with manual override option
-   */
-  async detectWithOverride(
-    server: any,
+
+  private async checkSignature(
+    server: Server,
     path: string,
-    manualTechStack?: TechStack,
+    techStack: string,
+    signature: DetectionSignature,
   ): Promise<{
-    result: DetectionResult;
-    method: DetectionMethod;
+    techStack: string;
+    version?: string;
+    confidence: number;
+    metadata?: Record<string, any>;
   }> {
-    // If manual tech stack is provided, use it
-    if (manualTechStack) {
-      const plugin = this.pluginRegistry.getPlugin(manualTechStack);
-      if (!plugin) {
-        throw new Error(`Plugin for ${manualTechStack} not available`);
+    try {
+      // Check for required files
+      if (signature.files) {
+        const filesExist = await this.checkFilesExist(server, path, signature.files);
+        if (!filesExist) {
+          return { techStack, confidence: 0 };
+        }
       }
-      
-      // Verify the manual selection
-      const verificationResult = await plugin.detect(server, path);
-      
+
+      // Get version if possible
+      let version: string | undefined;
+      const metadata: Record<string, any> = {};
+
+      if (signature.versionCommand) {
+        try {
+          const versionOutput = await this.sshExecutor.executeCommand(
+            server,
+            `cd ${path} && ${signature.versionCommand}`,
+          );
+          
+          if (signature.versionRegex) {
+            const match = versionOutput.match(signature.versionRegex);
+            version = match ? match[1] : undefined;
+          } else {
+            version = versionOutput.trim().replace(/^v/, '');
+          }
+        } catch (error) {
+          // Version detection failed, but file exists
+        }
+      }
+
+      if (signature.versionFile) {
+        try {
+          const fileContent = await this.sshExecutor.executeCommand(
+            server,
+            `cat ${path}/${signature.versionFile}`,
+          );
+          
+          if (signature.versionRegex) {
+            const match = fileContent.match(signature.versionRegex);
+            version = match ? match[1] : undefined;
+          }
+        } catch (error) {
+          // Version file not found
+        }
+      }
+
+      // Special checks for specific tech stacks
+      if (techStack === 'NODEJS' || techStack === 'NEXTJS' || techStack === 'EXPRESS') {
+        const packageJson = await this.readPackageJson(server, path);
+        if (packageJson) {
+          metadata.packageName = packageJson.name;
+          
+          // Distinguish between Next.js, Express, and generic Node.js
+          if (techStack === 'NEXTJS' && !packageJson.dependencies?.next) {
+            return { techStack, confidence: 0 };
+          }
+          
+          if (techStack === 'EXPRESS') {
+            if (!packageJson.dependencies?.express || packageJson.dependencies?.next) {
+              return { techStack, confidence: 0 };
+            }
+          }
+          
+          if (techStack === 'NODEJS') {
+            // Generic Node.js - only if not Next.js or Express
+            if (packageJson.dependencies?.next || packageJson.dependencies?.express) {
+              return { techStack, confidence: 0 };
+            }
+          }
+        }
+      }
+
+      if (techStack === 'LARAVEL') {
+        const composerJson = await this.readComposerJson(server, path);
+        if (composerJson && !composerJson.require?.['laravel/framework']) {
+          return { techStack, confidence: 0 };
+        }
+      }
+
       return {
-        result: {
-          detected: true,
-          techStack: manualTechStack,
-          confidence: verificationResult.detected ? 1.0 : 0.5,
-          version: verificationResult.version,
-          metadata: verificationResult.metadata,
-        },
-        method: DetectionMethod.MANUAL,
+        techStack,
+        version,
+        confidence: signature.confidence,
+        metadata,
       };
+    } catch (error) {
+      return { techStack, confidence: 0 };
     }
-    
-    // Otherwise, auto-detect
-    const result = await this.detect(server, path);
-    
-    return {
-      result,
-      method: DetectionMethod.AUTO,
-    };
   }
-  
-  /**
-   * Re-detect tech stack for an existing application
-   * Useful when application has been updated or detection was incorrect
-   */
-  async redetect(application: any, server: any): Promise<DetectionResult> {
-    this.logger.log(`Re-detecting tech stack for application ${application.id}`);
-    return this.detect(server, application.path);
+
+  private async checkFilesExist(
+    server: Server,
+    path: string,
+    files: string[],
+  ): Promise<boolean> {
+    try {
+      const checkCommands = files.map(file => `[ -e "${path}/${file}" ]`).join(' && ');
+      await this.sshExecutor.executeCommand(server, checkCommands);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private async readPackageJson(
+    server: Server,
+    path: string,
+  ): Promise<any | null> {
+    try {
+      const content = await this.sshExecutor.executeCommand(
+        server,
+        `cat ${path}/package.json`,
+      );
+      return JSON.parse(content);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private async readComposerJson(
+    server: Server,
+    path: string,
+  ): Promise<any | null> {
+    try {
+      const content = await this.sshExecutor.executeCommand(
+        server,
+        `cat ${path}/composer.json`,
+      );
+      return JSON.parse(content);
+    } catch (error) {
+      return null;
+    }
   }
 }

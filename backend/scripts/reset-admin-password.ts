@@ -13,11 +13,13 @@ async function resetAdminPassword() {
     parallelism: 4,
   });
 
-  const user = await prisma.user.update({
+  const user = await prisma.users.update({
     where: { email: 'admin@opsmanager.local' },
     data: {
       passwordHash,
       mustChangePassword: false,
+      isLocked: false,
+      failedLoginAttempts: 0,
     },
   });
 

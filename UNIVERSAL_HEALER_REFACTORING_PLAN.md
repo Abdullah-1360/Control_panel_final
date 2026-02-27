@@ -46,6 +46,31 @@ Transform the WordPress-specific healer module into a universal, tech-stack-agno
 
 ## 2. Architecture Overview
 
+### 2.0 Migration Strategy (ACTIVE)
+
+**Current Status:** Phase 2.5 - Stabilization  
+**Decision:** Gradual Migration (Option 1)  
+**Timeline:** 10 weeks total (Feb 26 - May 6, 2026)
+
+**Rationale:**
+- WordPress healer is fully functional and production-ready
+- Universal healer requires per-tech-stack plugins (Phase 3)
+- Cannot identify all tech stacks at once during discovery
+- Dual system approach minimizes risk and maintains stability
+
+**Implementation Approach:**
+1. **Phase 2.5 (NOW):** Keep WordPress working, document strategy, add UI banners
+2. **Phase 3 (4-6 weeks):** Implement plugins, migrate WordPress to universal system
+3. **Phase 4 (2-3 weeks):** Deprecate old endpoints, cleanup code
+
+**Key Principles:**
+- No breaking changes to working WordPress functionality
+- Clean separation during development
+- Easy to test new features without affecting production
+- Gradual rollout with feature flags
+
+**Reference:** See `GRADUAL_MIGRATION_STRATEGY.md` for complete details
+
 ### 2.1 Core Components
 
 ```
@@ -791,7 +816,41 @@ export class LaravelPlugin implements IStackPlugin {
 
 ## 8. Implementation Phases
 
-### Phase 1: Core Framework (2 weeks)
+### Phase 2.5: Stabilization & Documentation (1 week) - IN PROGRESS
+
+**Status:** ACTIVE  
+**Start Date:** February 26, 2026  
+**End Date:** March 4, 2026
+
+**Objectives:**
+- Stabilize WordPress healer functionality
+- Document migration strategy
+- Prepare for Phase 3 plugin development
+- Add user-facing communication about upcoming features
+
+**Tasks:**
+- [x] Keep WordPress healer fully functional
+- [x] Document gradual migration strategy (GRADUAL_MIGRATION_STRATEGY.md)
+- [x] Update all related documentation
+- [x] Add "Phase 3 coming soon" banner to HealerView component
+- [x] Add health check endpoint showing migration status
+- [x] Update UNIVERSAL_HEALER_REFACTORING_PLAN.md with migration strategy
+- [x] Update PHASE2_IMPLEMENTATION_COMPLETE.md to reflect dual system
+- [ ] Create API documentation marking endpoints as "operational" vs "preview"
+- [ ] Create migration tracking dashboard/checklist
+
+**Deliverables:**
+- WordPress healer working perfectly ✅
+- Clear documentation of migration path ✅
+- No breaking changes ✅
+- User communication in place ✅
+- Health endpoint operational ✅
+
+---
+
+### Phase 1: Core Framework (2 weeks) - PLANNED
+
+**Note:** This is Phase 3 in the migration timeline (after Phase 2.5 stabilization)
 
 **Week 1:**
 - [ ] Create new database schema (applications, diagnostic_results, tech_stack_plugins)

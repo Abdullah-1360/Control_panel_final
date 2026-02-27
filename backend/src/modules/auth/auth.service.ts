@@ -861,6 +861,11 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    // Transform 'roles' to 'role' for frontend compatibility
+    return {
+      ...user,
+      role: user.roles,
+      roles: undefined,
+    };
   }
 }

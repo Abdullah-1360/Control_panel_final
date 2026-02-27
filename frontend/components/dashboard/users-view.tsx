@@ -49,7 +49,7 @@ interface User {
   lastName: string | null
   isActive: boolean
   mfaEnabled: boolean
-  role: {
+  role?: {
     id: string
     name: string
     displayName: string
@@ -228,7 +228,7 @@ export function UsersView() {
   // Open role assignment dialog
   const handleOpenRoleDialog = (user: User) => {
     setSelectedUser(user)
-    setNewRoleId(user.role.id)
+    setNewRoleId(user.role?.id ?? '')
     setShowRoleDialog(true)
   }
 
@@ -369,7 +369,7 @@ export function UsersView() {
                   <TableCell>
                     <Badge variant="outline" className="gap-1">
                       <Shield className="h-3 w-3" />
-                      {user.role.displayName}
+                      {user.role?.displayName ?? 'No Role'}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -563,7 +563,7 @@ export function UsersView() {
             <div className="space-y-2">
               <Label>Current Role</Label>
               <div className="p-2 bg-muted rounded-md">
-                <Badge variant="outline">{selectedUser?.role.displayName}</Badge>
+                <Badge variant="outline">{selectedUser?.role?.displayName ?? 'No Role'}</Badge>
               </div>
             </div>
             <div className="space-y-2">
@@ -591,7 +591,7 @@ export function UsersView() {
             <Button variant="outline" onClick={() => setShowRoleDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAssignRole} disabled={!newRoleId || newRoleId === selectedUser?.role.id}>
+            <Button onClick={handleAssignRole} disabled={!newRoleId || newRoleId === selectedUser?.role?.id}>
               Assign Role
             </Button>
           </DialogFooter>

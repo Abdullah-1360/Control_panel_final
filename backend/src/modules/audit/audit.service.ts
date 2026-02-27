@@ -99,8 +99,15 @@ export class AuditService {
       this.prisma.audit_logs.count({ where }),
     ]);
 
+    // Transform 'users' to 'user' for frontend compatibility
+    const transformedLogs = logs.map((log) => ({
+      ...log,
+      user: log.users,
+      users: undefined,
+    }));
+
     return {
-      data: logs,
+      data: transformedLogs,
       pagination: {
         total,
         page,
