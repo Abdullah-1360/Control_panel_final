@@ -39,6 +39,7 @@ import { DiagnosePage } from '@/components/healer/DiagnosePage';
 import { ConfigurePage } from '@/components/healer/ConfigurePage';
 import { SubdomainConfigModal } from '@/components/healer/SubdomainConfigModal';
 import { DiscoverApplicationsModal } from '@/components/healer/DiscoverApplicationsModal';
+import { DiscoveryMonitoringDashboard } from '@/components/healer/DiscoveryMonitoringDashboard';
 import { TECH_STACKS } from '@/lib/tech-stacks';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api/client';
@@ -46,7 +47,7 @@ import { healerApi } from '@/lib/api/healer';
 import { useApplication, useDiagnoseApplication, useUpdateApplication } from '@/hooks/use-healer';
 import { cn } from '@/lib/utils';
 
-type View = 'list' | 'detail';
+type View = 'list' | 'detail' | 'discovery-queue';
 type DetailTab = 'overview' | 'diagnostics' | 'configure';
 
 export function UniversalHealerView() {
@@ -357,10 +358,16 @@ export function UniversalHealerView() {
               Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">⌘K</kbd> to search, <kbd className="px-1 py-0.5 bg-muted rounded text-xs">⌘N</kbd> to discover
             </div>
           </div>
-          <Button onClick={() => setIsDiscoverModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Discover Applications
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView('discovery-queue')}>
+              <Server className="mr-2 h-4 w-4" />
+              Discovery Queue
+            </Button>
+            <Button onClick={() => setIsDiscoverModalOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Discover Applications
+            </Button>
+          </div>
         </div>
 
         {/* Quick Stats Dashboard */}
@@ -577,6 +584,30 @@ export function UniversalHealerView() {
           onClose={() => setIsDiscoverModalOpen(false)}
           servers={serversData?.data || []}
         />
+      </div>
+    );
+  }
+
+  // Render discovery queue view
+  if (currentView === 'discovery-queue') {
+    return (
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Discovery Queue</h1>
+            <p className="text-muted-foreground">
+              Monitor application discovery jobs and queue statistics
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setCurrentView('list')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Applications
+          </Button>
+        </div>
+
+        {/* Discovery Monitoring Dashboard */}
+        <DiscoveryMonitoringDashboard />
       </div>
     );
   }

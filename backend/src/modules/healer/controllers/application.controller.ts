@@ -14,7 +14,9 @@ import {
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
+import { CurrentUser, JwtPayload } from '../../../common/decorators/current-user.decorator';
 import { ApplicationService } from '../services/application.service';
+import { DiscoveryQueueService } from '../services/discovery-queue.service';
 import {
   CreateApplicationDto,
   UpdateApplicationDto,
@@ -29,7 +31,10 @@ import { TechStack, HealthStatus } from '@prisma/client';
 @Controller('healer/applications')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ApplicationController {
-  constructor(private readonly applicationService: ApplicationService) {}
+  constructor(
+    private readonly applicationService: ApplicationService,
+    private readonly discoveryQueueService: DiscoveryQueueService,
+  ) {}
 
   /**
    * Get all applications with filters
@@ -95,7 +100,7 @@ export class ApplicationController {
   }
 
   /**
-   * Discover applications on a server
+   * Discover applications on a server (synchronous - legacy)
    */
   @Post('discover')
   @RequirePermissions('healer', 'create')
@@ -106,6 +111,74 @@ export class ApplicationController {
       techStacks: discoverDto.techStacks,
       forceRediscover: discoverDto.forceRediscover,
     });
+  }
+
+  /**
+   * Discover applications on a server (queued - recommended)
+   */
+  @Post('discover-queued')
+  @RequirePermissions('healer', 'create')
+  async discoverQueued(
+    @Body() discoverDto: DiscoverApplicationsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const server = await this.applicationService['prisma'].servers.findUnique({
+      where: { id: discoverDto.serverId },
+      select: { name: true },
+    });
+
+    if (!server) {
+      throw new Error('Server not found');
+    }
+
+    const jobId = await this.discoveryQueueService.enqueueDiscovery({
+      serverId: discoverDto.serverId,
+      serverName: server.name,
+      triggeredBy: user.userId,
+      triggerType: 'MANUAL',
+      options: {
+        forceRediscover: discoverDto.forceRediscover,
+        paths: discoverDto.paths,
+        techStacks: discoverDto.techStacks,
+      },
+    });
+
+    return {
+      jobId,
+      message: 'Discovery job enqueued successfully',
+    };
+  }
+
+  /**
+   * Get discovery job progress
+   */
+  @Get('discovery/:jobId/progress')
+  @RequirePermissions('healer', 'read')
+  async getDiscoveryProgress(@Param('jobId') jobId: string) {
+    const progress = await this.discoveryQueueService.getProgress(jobId);
+    if (!progress) {
+      throw new Error('Discovery job not found');
+    }
+    return progress;
+  }
+
+  /**
+   * Get discovery queue statistics
+   */
+  @Get('discovery/stats')
+  @RequirePermissions('healer', 'read')
+  async getDiscoveryStats() {
+    return this.discoveryQueueService.getQueueStats();
+  }
+
+  /**
+   * Get recent discovery jobs
+   */
+  @Get('discovery/recent')
+  @RequirePermissions('healer', 'read')
+  async getRecentDiscoveryJobs(@Query('limit') limit?: string) {
+    const limitNum = limit ? parseInt(limit, 10) : 10;
+    return this.discoveryQueueService.getRecentJobs(limitNum);
   }
 
   /**

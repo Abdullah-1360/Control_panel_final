@@ -7,6 +7,19 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
   LineChart,
   Line,
   XAxis,
@@ -29,10 +42,29 @@ import {
   Network,
   Zap,
   Server as ServerIcon,
+  FileText,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useServerLatestMetrics, useServerMetricsHistory, useCollectMetrics } from "@/hooks/use-metrics"
 import { toast } from "sonner"
+
+// Utility function to format large numbers (inodes)
+function formatNumber(num: number | string | undefined): string {
+  if (num === undefined || num === null) return 'N/A'
+  const n = typeof num === 'string' ? parseInt(num, 10) : num
+  if (isNaN(n)) return 'N/A'
+  if (n >= 1000000000) {
+    return `${(n / 1000000000).toFixed(2)}B`
+  } else if (n >= 1000000) {
+    return `${(n / 1000000).toFixed(2)}M`
+  } else if (n >= 1000) {
+    return `${(n / 1000).toFixed(2)}K`
+  } else {
+    return n.toString()
+  }
+}
 
 // Utility function to format bytes/MB to human-readable format
 function formatBytes(mb: number): string {
@@ -224,6 +256,7 @@ function MetricChart({
 
 export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabProps) {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
+  const [diskBreakdownExpanded, setDiskBreakdownExpanded] = useState(false)
 
   const { data: latestMetrics, isLoading: latestLoading, refetch: refetchLatest } = useServerLatestMetrics(
     serverId,
@@ -374,7 +407,7 @@ export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabP
       </div>
 
       {/* Primary Metrics - Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           label="CPU Usage"
           value={latestMetrics.cpuUsagePercent ?? 0}
@@ -398,6 +431,13 @@ export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabP
           icon={HardDrive}
           threshold={90}
           sparklineData={diskSparklineData}
+        />
+        <StatCard
+          label="Inode Usage"
+          value={latestMetrics.inodeUsagePercent ?? 0}
+          unit="%"
+          icon={FileText}
+          threshold={90}
         />
         <StatCard
           label="Uptime"
@@ -439,7 +479,7 @@ export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabP
       )}
 
       {/* Additional Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="border-border">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -458,6 +498,35 @@ export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabP
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">15 min</span>
                 <span className="font-mono font-medium">{latestMetrics.loadAverage15m?.toFixed(2) || 'N/A'}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground uppercase tracking-wider">Inodes</span>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-mono font-medium">
+                  {latestMetrics.inodeTotal != null ? formatNumber(latestMetrics.inodeTotal) : 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Used</span>
+                <span className="font-mono font-medium">
+                  {latestMetrics.inodeUsed != null ? formatNumber(latestMetrics.inodeUsed) : 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Free</span>
+                <span className="font-mono font-medium">
+                  {latestMetrics.inodeFree != null ? formatNumber(latestMetrics.inodeFree) : 'N/A'}
+                </span>
               </div>
             </div>
           </CardContent>
@@ -524,6 +593,115 @@ export function ServerMetricsTab({ serverId, metricsEnabled }: ServerMetricsTabP
           </CardContent>
         </Card>
       </div>
+
+      {/* Disk & Inode Breakdown Table */}
+      {latestMetrics.diskBreakdown && latestMetrics.diskBreakdown.length > 0 && (
+        <Card className="border-border">
+          <Collapsible open={diskBreakdownExpanded} onOpenChange={setDiskBreakdownExpanded}>
+            <CardHeader className="pb-3">
+              <CollapsibleTrigger className="flex items-center justify-between w-full hover:opacity-80 transition-opacity">
+                <div className="flex items-center gap-2">
+                  {diskBreakdownExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <CardTitle className="text-sm font-medium">
+                    Disk & Inode Breakdown by Filesystem
+                  </CardTitle>
+                  <Badge variant="secondary" className="text-xs">
+                    {latestMetrics.diskBreakdown.length} filesystems
+                  </Badge>
+                </div>
+              </CollapsibleTrigger>
+              <CardDescription className="mt-2">
+                Detailed storage and inode usage per mounted filesystem
+              </CardDescription>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[200px]">Filesystem</TableHead>
+                        <TableHead className="w-[150px]">Mount Point</TableHead>
+                        <TableHead className="text-right">Disk Total</TableHead>
+                        <TableHead className="text-right">Disk Used</TableHead>
+                        <TableHead className="text-right">Disk Free</TableHead>
+                        <TableHead className="text-right">Disk %</TableHead>
+                        <TableHead className="text-right">Inodes Total</TableHead>
+                        <TableHead className="text-right">Inodes Used</TableHead>
+                        <TableHead className="text-right">Inodes Free</TableHead>
+                        <TableHead className="text-right">Inode %</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {latestMetrics.diskBreakdown.map((fs, index) => {
+                        const diskWarning = fs.diskUsagePercent >= 70 && fs.diskUsagePercent < 90
+                        const diskDanger = fs.diskUsagePercent >= 90
+                        const inodeWarning = fs.inodeUsagePercent >= 70 && fs.inodeUsagePercent < 90
+                        const inodeDanger = fs.inodeUsagePercent >= 90
+
+                        return (
+                          <TableRow key={index}>
+                            <TableCell className="font-mono text-xs">
+                              {fs.filesystem}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {fs.mountPoint}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {fs.diskTotalGB.toFixed(2)} GB
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {fs.diskUsedGB.toFixed(2)} GB
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {fs.diskFreeGB.toFixed(2)} GB
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge
+                                variant={diskDanger ? "destructive" : diskWarning ? "secondary" : "outline"}
+                                className={cn(
+                                  "text-xs font-mono",
+                                  diskWarning && "bg-warning/20 text-warning border-warning/50"
+                                )}
+                              >
+                                {fs.diskUsagePercent.toFixed(1)}%
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {formatNumber(fs.inodeTotal)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {formatNumber(fs.inodeUsed)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {formatNumber(fs.inodeFree)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge
+                                variant={inodeDanger ? "destructive" : inodeWarning ? "secondary" : "outline"}
+                                className={cn(
+                                  "text-xs font-mono",
+                                  inodeWarning && "bg-warning/20 text-warning border-warning/50"
+                                )}
+                              >
+                                {fs.inodeUsagePercent.toFixed(1)}%
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
+      )}
     </div>
   )
 }

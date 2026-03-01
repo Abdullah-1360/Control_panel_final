@@ -10,6 +10,15 @@ export function useAggregatedMetrics() {
   });
 }
 
+export function useAggregatedMetricsHistory(hours: number = 2) {
+  return useQuery({
+    queryKey: ['metrics', 'aggregate', 'history', hours],
+    queryFn: () => apiClient.getAggregatedMetricsHistory(hours),
+    refetchInterval: 60000, // Refresh every minute
+    staleTime: 30000,
+  });
+}
+
 export function useServerLatestMetrics(serverId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ['metrics', 'server', serverId, 'latest'],

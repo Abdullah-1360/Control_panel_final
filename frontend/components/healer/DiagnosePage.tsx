@@ -45,10 +45,8 @@ export function DiagnosePage({
     setIsRunning(true);
     try {
       const response = await diagnoseMutation.mutateAsync({
-        id: application.id,
-        data: {
-          categories: ['SYSTEM', 'DATABASE', 'APPLICATION', 'SECURITY', 'PERFORMANCE'],
-        },
+        applicationId: application.id,
+        subdomain: undefined,
       });
       
       setResults(response.results || []);

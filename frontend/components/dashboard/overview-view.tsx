@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "./stat-card"
+import { ServicesOverview } from "./services-overview-v2"
 import {
   Server,
   Activity,
@@ -16,6 +17,8 @@ import {
   Globe,
   TrendingUp,
   Loader2,
+  FileText,
+  Network,
 } from "lucide-react"
 import {
   AreaChart,
@@ -27,12 +30,9 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts"
 import { useServers } from "@/hooks/use-servers"
-import { useAggregatedMetrics } from "@/hooks/use-metrics"
+import { useAggregatedMetrics, useAggregatedMetricsHistory } from "@/hooks/use-metrics"
 import { useMemo } from "react"
 
 const tooltipStyle = {
@@ -55,6 +55,7 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
     { refetchInterval: 30000 }
   )
   const { data: metricsData, isLoading: metricsLoading, error: metricsError } = useAggregatedMetrics()
+  const { data: metricsHistory, isLoading: historyLoading } = useAggregatedMetricsHistory(2) // 2 hours
 
   const servers = serversData?.data || []
   const totalServers = serversData?.pagination?.total || 0
@@ -62,8 +63,13 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
     avgCpuUsage: 0,
     avgMemoryUsage: 0,
     avgDiskUsage: 0,
+    avgInodeUsage: 0,
     totalServers: 0,
     serversWithMetrics: 0,
+    totalStorageGB: 0,
+    usedStorageGB: 0,
+    totalNetworkRxMB: 0,
+    totalNetworkTxMB: 0,
     servers: [],
   }
 
@@ -115,6 +121,16 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
 
   const uptimePercent = avgUptimeSeconds > 0 ? 99.9 : 0 // Simplified calculation
 
+  // Calculate average inode usage
+  const avgInodeUsage = useMemo(() => {
+    const serversWithInodes = metrics.servers.filter((s) => s.metrics?.inodeUsagePercent)
+    if (serversWithInodes.length === 0) return 0
+    return (
+      serversWithInodes.reduce((sum, s) => sum + (s.metrics?.inodeUsagePercent || 0), 0) /
+      serversWithInodes.length
+    )
+  }, [metrics.servers])
+
   // Top resource consumers (real data)
   const topServers = useMemo(() => {
     return metrics.servers
@@ -125,6 +141,7 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
         cpu: s.metrics?.cpuUsagePercent || 0,
         ram: s.metrics?.memoryUsagePercent || 0,
         disk: s.metrics?.diskUsagePercent || 0,
+        inode: s.metrics?.inodeUsagePercent || 0,
         status:
           (s.metrics?.cpuUsagePercent || 0) >= 90 || (s.metrics?.memoryUsagePercent || 0) >= 95
             ? "critical"
@@ -136,55 +153,46 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
       .slice(0, 5)
   }, [metrics.servers])
 
-  // Generate CPU history data (last 24 hours from current metrics)
+  // Generate CPU history data from real historical metrics
   const cpuData = useMemo(() => {
-    const data = []
-    const now = new Date()
-    for (let i = 23; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-      data.push({
-        time: time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
-        value: i === 0 ? metrics.avgCpuUsage : metrics.avgCpuUsage * (0.8 + Math.random() * 0.4), // Current + simulated history
-      })
+    if (metricsHistory && metricsHistory.length > 0) {
+      // Use real historical data
+      return metricsHistory.map((point) => ({
+        time: new Date(point.collectedAt).toLocaleTimeString("en-US", { 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          hour12: false 
+        }),
+        cpu: point.avgCpuUsage,
+        memory: point.avgMemoryUsage,
+        disk: point.avgDiskUsage,
+      }));
     }
-    return data
-  }, [metrics.avgCpuUsage])
+    
+    // Fallback: If no history yet, show current metrics only
+    if (metrics.serversWithMetrics > 0) {
+      const now = new Date();
+      return [{
+        time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        cpu: metrics.avgCpuUsage,
+        memory: metrics.avgMemoryUsage,
+        disk: metrics.avgDiskUsage,
+      }];
+    }
+    
+    return [];
+  }, [metricsHistory, metrics.avgCpuUsage, metrics.avgMemoryUsage, metrics.avgDiskUsage, metrics.serversWithMetrics])
 
-  // Generate network data (simulated based on server count)
-  const networkData = useMemo(() => {
-    const data = []
-    const now = new Date()
-    const baseInbound = totalServers * 50
-    const baseOutbound = totalServers * 35
-    for (let i = 23; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-      const hour = time.getHours()
-      const multiplier = hour >= 8 && hour <= 18 ? 1.5 : 0.6 // Business hours
-      data.push({
-        time: time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
-        inbound: Math.round(baseInbound * multiplier * (0.8 + Math.random() * 0.4)),
-        outbound: Math.round(baseOutbound * multiplier * (0.8 + Math.random() * 0.4)),
-      })
-    }
-    return data
-  }, [totalServers])
-
-  // Generate requests data (simulated)
-  const requestsData = useMemo(() => {
-    const data = []
-    const now = new Date()
-    const baseRequests = totalServers * 500
-    for (let i = 7; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 2 * 60 * 60 * 1000)
-      const hour = time.getHours()
-      const multiplier = hour >= 8 && hour <= 18 ? 1.8 : 0.5
-      data.push({
-        hour: time.toLocaleTimeString("en-US", { hour: "numeric", hour12: true }),
-        requests: Math.round(baseRequests * multiplier * (0.8 + Math.random() * 0.4)),
-      })
-    }
-    return data
-  }, [totalServers])
+  // Calculate total network traffic
+  const totalNetworkData = useMemo(() => {
+    const serversWithNetwork = metrics.servers.filter((s) => s.metrics?.networkRxTotalMB || s.metrics?.networkTxTotalMB)
+    if (serversWithNetwork.length === 0) return { rx: 0, tx: 0 }
+    
+    const totalRx = serversWithNetwork.reduce((sum, s) => sum + (s.metrics?.networkRxTotalMB || 0), 0)
+    const totalTx = serversWithNetwork.reduce((sum, s) => sum + (s.metrics?.networkTxTotalMB || 0), 0)
+    
+    return { rx: totalRx, tx: totalTx }
+  }, [metrics.servers])
 
   // Server regions (based on environment tags)
   const regionData = useMemo(() => {
@@ -260,7 +268,7 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
     return activities.slice(0, 5)
   }, [servers, topServers])
 
-  const isLoading = serversLoading || metricsLoading
+  const isLoading = serversLoading || metricsLoading || historyLoading
 
   if (isLoading) {
     return (
@@ -295,7 +303,7 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="Total Servers"
           value={totalServers.toString()}
@@ -312,6 +320,14 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
           subtitle="across all servers"
         />
         <StatCard
+          label="Avg. Memory"
+          value={`${metrics.avgMemoryUsage.toFixed(1)}%`}
+          change={metrics.avgMemoryUsage > 75 ? "High usage" : "Normal"}
+          changeType={metrics.avgMemoryUsage > 75 ? "negative" : "positive"}
+          icon={Activity}
+          subtitle="across all servers"
+        />
+        <StatCard
           label="Total Storage"
           value={formatStorage(totalStorageGB)}
           change={`${storageUsagePercent.toFixed(0)}% used`}
@@ -319,366 +335,595 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
           icon={HardDrive}
         />
         <StatCard
-          label="Uptime"
-          value={`${uptimePercent.toFixed(2)}%`}
-          change={`${Math.floor(avgUptimeSeconds / 86400)}d avg`}
-          changeType="positive"
-          icon={Wifi}
-          subtitle="last 30 days"
+          label="Avg. Inodes"
+          value={`${avgInodeUsage.toFixed(1)}%`}
+          change={avgInodeUsage > 70 ? "High usage" : "Normal"}
+          changeType={avgInodeUsage > 70 ? "negative" : "positive"}
+          icon={FileText}
+          subtitle="file system nodes"
         />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* CPU Usage Chart */}
-        <Card className="border-border bg-card">
+      {/* Charts Row - Modern Design */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Multi-Metric Chart */}
+        <Card className="border-border bg-card lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
-              <CardTitle className="text-sm font-medium text-foreground">CPU Usage (Avg)</CardTitle>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Across all servers - Last 24h</p>
+              <CardTitle className="text-sm font-medium text-foreground">Resource Usage Overview</CardTitle>
+              <p className="text-[11px] text-muted-foreground mt-0.5">CPU, Memory & Disk usage - Last 2 hours (5-min intervals)</p>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse-dot" />
-              <span className="text-[10px] font-medium text-success">Live</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-primary" />
+                <span className="text-[10px] text-muted-foreground">CPU</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-chart-2" />
+                <span className="text-[10px] text-muted-foreground">Memory</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-success" />
+                <span className="text-[10px] text-muted-foreground">Disk</span>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={cpuData}>
-                  <defs>
-                    <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(160, 84%, 44%)" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="hsl(160, 84%, 44%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(228, 10%, 13%)" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => `${v.toFixed(0)}%`}
-                  />
-                  <RechartsTooltip
-                    contentStyle={tooltipStyle}
-                    formatter={(value: number) => [`${value.toFixed(1)}%`, "CPU"]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke="hsl(160, 84%, 44%)"
-                    strokeWidth={2}
-                    fill="url(#cpuGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            {cpuData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={cpuData}>
+                    <defs>
+                      <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="memoryGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="diskGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} opacity={0.3} />
+                    <XAxis
+                      dataKey="time"
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v) => `${v.toFixed(0)}%`}
+                      domain={[0, 100]}
+                    />
+                    <RechartsTooltip
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--popover))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                        fontSize: "12px",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                      }}
+                      formatter={(value: number, name: string) => [
+                        `${value.toFixed(1)}%`,
+                        name === 'cpu' ? 'CPU' : name === 'memory' ? 'Memory' : 'Disk'
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="cpu"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      fill="url(#cpuGradient)"
+                      animationDuration={1000}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="memory"
+                      stroke="hsl(var(--chart-2))"
+                      strokeWidth={2}
+                      fill="url(#memoryGradient)"
+                      animationDuration={1000}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="disk"
+                      stroke="hsl(var(--success))"
+                      strokeWidth={2}
+                      fill="url(#diskGradient)"
+                      animationDuration={1000}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                No metrics data available. Collect metrics to see charts.
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Network Traffic Chart */}
+        {/* Network Traffic Card */}
         <Card className="border-border bg-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <div>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-medium text-foreground">Network Traffic</CardTitle>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Inbound / Outbound - Last 24h</p>
+              <Network className="h-4 w-4 text-muted-foreground" />
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-chart-2" />
-                <span className="text-[10px] text-muted-foreground">In</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-primary" />
-                <span className="text-[10px] text-muted-foreground">Out</span>
-              </div>
-            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Total data transferred</p>
           </CardHeader>
-          <CardContent className="pt-0">
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={networkData}>
-                  <defs>
-                    <linearGradient id="inGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(217, 91%, 60%)" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="hsl(217, 91%, 60%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="outGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(160, 84%, 44%)" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="hsl(160, 84%, 44%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(228, 10%, 13%)" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
+          <CardContent className="pt-4">
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-chart-2" />
+                    <span className="text-xs text-muted-foreground">Received</span>
+                  </div>
+                  <span className="text-sm font-mono font-semibold text-foreground">
+                    {totalNetworkData.rx >= 1024 
+                      ? `${(totalNetworkData.rx / 1024).toFixed(2)} GB`
+                      : `${totalNetworkData.rx.toFixed(2)} MB`}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full bg-chart-2 transition-all duration-500"
+                    style={{ width: `${Math.min((totalNetworkData.rx / (totalNetworkData.rx + totalNetworkData.tx)) * 100, 100)}%` }}
                   />
-                  <YAxis
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => `${v} MB`}
+                </div>
+              </div>
+              
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-primary" />
+                    <span className="text-xs text-muted-foreground">Transmitted</span>
+                  </div>
+                  <span className="text-sm font-mono font-semibold text-foreground">
+                    {totalNetworkData.tx >= 1024 
+                      ? `${(totalNetworkData.tx / 1024).toFixed(2)} GB`
+                      : `${totalNetworkData.tx.toFixed(2)} MB`}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-500"
+                    style={{ width: `${Math.min((totalNetworkData.tx / (totalNetworkData.rx + totalNetworkData.tx)) * 100, 100)}%` }}
                   />
-                  <RechartsTooltip contentStyle={tooltipStyle} />
-                  <Area
-                    type="monotone"
-                    dataKey="inbound"
-                    stroke="hsl(217, 91%, 60%)"
-                    strokeWidth={1.5}
-                    fill="url(#inGradient)"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="outbound"
-                    stroke="hsl(160, 84%, 44%)"
-                    strokeWidth={1.5}
-                    fill="url(#outGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Total Traffic</span>
+                  <span className="text-lg font-mono font-bold text-foreground">
+                    {(totalNetworkData.rx + totalNetworkData.tx) >= 1024 
+                      ? `${((totalNetworkData.rx + totalNetworkData.tx) / 1024).toFixed(2)} GB`
+                      : `${(totalNetworkData.rx + totalNetworkData.tx).toFixed(2)} MB`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Servers</div>
+                  <div className="text-xl font-bold text-foreground">{metrics.serversWithMetrics}</div>
+                </div>
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Active</div>
+                  <div className="text-xl font-bold text-success">{runningServers}</div>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Bottom Row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Requests Chart */}
+      {/* Bottom Row - Redesigned */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Server Environments - Redesigned */}
         <Card className="border-border bg-card">
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-foreground">Requests Today</CardTitle>
-              <div className="flex items-center gap-1 text-success">
-                <TrendingUp className="h-3 w-3" />
-                <span className="text-[10px] font-medium">Live</span>
+              <div>
+                <CardTitle className="text-sm font-medium text-foreground">Server Environments</CardTitle>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{totalServers} servers across {regionData.length} environments</p>
               </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Total: {requestsData.reduce((sum, d) => sum + d.requests, 0).toLocaleString()} requests
-            </p>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={requestsData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(228, 10%, 13%)" vertical={false} />
-                  <XAxis
-                    dataKey="hour"
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    stroke="hsl(220, 10%, 36%)"
-                    fontSize={10}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <RechartsTooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="requests" fill="hsl(160, 84%, 44%)" radius={[4, 4, 0, 0]} opacity={0.85} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Server Regions */}
-        <Card className="border-border bg-card">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-foreground">Server Environments</CardTitle>
               <Globe className="h-4 w-4 text-muted-foreground" />
             </div>
           </CardHeader>
           <CardContent className="pt-0">
             {regionData.length > 0 ? (
-              <div className="flex items-center gap-4">
-                <div className="h-40 w-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={regionData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={45}
-                        outerRadius={65}
-                        paddingAngle={3}
-                        dataKey="value"
-                        strokeWidth={0}
-                      >
-                        {regionData.map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex-1 space-y-3">
-                  {regionData.map((region) => (
-                    <div key={region.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: region.color }} />
-                        <span className="text-xs text-muted-foreground">{region.name || "Unknown"}</span>
+              <div className="space-y-2">
+                {regionData.map((region, index) => {
+                  const serverCount = Math.round((region.value / 100) * totalServers)
+                  const runningInEnv = servers.filter(s => (s.environment || "Unknown") === region.name && s.lastTestStatus === "OK").length
+                  
+                  return (
+                    <div 
+                      key={region.name} 
+                      className="group relative overflow-hidden rounded-lg border border-border bg-gradient-to-r from-secondary/40 to-secondary/20 p-3 transition-all hover:border-primary/50 hover:shadow-md cursor-pointer"
+                      onClick={() => onViewChange("servers")}
+                    >
+                      {/* Background gradient bar */}
+                      <div 
+                        className="absolute inset-0 opacity-10 transition-opacity group-hover:opacity-20"
+                        style={{ 
+                          background: `linear-gradient(to right, ${region.color} 0%, transparent 100%)`,
+                          width: `${region.value}%`
+                        }}
+                      />
+                      
+                      <div className="relative flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div 
+                            className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
+                            style={{ backgroundColor: `${region.color}20`, border: `1px solid ${region.color}40` }}
+                          >
+                            <Globe className="h-5 w-5" style={{ color: region.color }} />
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-sm font-semibold text-foreground truncate">
+                                {region.name || "Unknown"}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse-dot" />
+                                <span className="text-[10px] text-success font-medium">{runningInEnv} online</span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-1.5">
+                                <Server className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">{serverCount} {serverCount === 1 ? 'server' : 'servers'}</span>
+                              </div>
+                              <div className="h-3 w-px bg-border" />
+                              <span className="text-xs font-mono font-bold tabular-nums" style={{ color: region.color }}>
+                                {region.value}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                      <span className="text-xs font-semibold tabular-nums text-foreground">{region.value}%</span>
                     </div>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
             ) : (
-              <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-                No environment data available
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Globe className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                <p className="text-sm font-medium text-foreground">No environment data</p>
+                <p className="text-xs text-muted-foreground mt-1">Add servers to see distribution</p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
+        {/* Recent Activity - Redesigned */}
         <Card className="border-border bg-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Recent Activity</CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={() => onViewChange("servers")}
-            >
-              View All <ArrowUpRight className="ml-1 h-3 w-3" />
-            </Button>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-medium text-foreground">Recent Activity</CardTitle>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Latest events from {recentActivity.length} sources</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => onViewChange("servers")}
+              >
+                View All <ArrowUpRight className="ml-1 h-3 w-3" />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             {recentActivity.length > 0 ? (
-              <div className="space-y-3">
-                {recentActivity.map((event, i) => (
-                  <div key={i} className="flex items-start gap-3">
-                    <event.icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${event.color}`} />
-                    <div className="flex-1 space-y-0.5">
-                      <p className="text-[11px] leading-relaxed text-foreground">{event.text}</p>
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-2.5 w-2.5 text-muted-foreground/60" />
-                        <span className="text-[10px] text-muted-foreground/60">{event.time}</span>
+              <div className="space-y-2">
+                {recentActivity.map((event, i) => {
+                  const isSuccess = event.color === 'text-success'
+                  const isError = event.color === 'text-destructive'
+                  const isWarning = event.color === 'text-warning'
+                  
+                  return (
+                    <div 
+                      key={i} 
+                      className={`group relative overflow-hidden rounded-lg border p-3 transition-all hover:shadow-md cursor-pointer ${
+                        isSuccess ? 'border-success/30 bg-success/5 hover:border-success/50' :
+                        isError ? 'border-destructive/30 bg-destructive/5 hover:border-destructive/50' :
+                        'border-warning/30 bg-warning/5 hover:border-warning/50'
+                      }`}
+                      onClick={() => onViewChange("servers")}
+                    >
+                      {/* Animated pulse for critical events */}
+                      {isError && (
+                        <div className="absolute inset-0 bg-destructive/5 animate-pulse" />
+                      )}
+                      
+                      <div className="relative flex items-start gap-3">
+                        <div className={`mt-0.5 h-9 w-9 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110 ${
+                          isSuccess ? 'bg-success/20 border border-success/30' :
+                          isError ? 'bg-destructive/20 border border-destructive/30' :
+                          'bg-warning/20 border border-warning/30'
+                        }`}>
+                          <event.icon className={`h-4 w-4 ${event.color}`} />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium leading-relaxed text-foreground mb-1.5 line-clamp-2">
+                            {event.text}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-3 w-3 text-muted-foreground/60" />
+                              <span className="text-[10px] text-muted-foreground/80 font-medium">{event.time}</span>
+                            </div>
+                            {isError && (
+                              <>
+                                <div className="h-3 w-px bg-border" />
+                                <span className="text-[10px] text-destructive font-semibold uppercase tracking-wider">Action Required</span>
+                              </>
+                            )}
+                            {isSuccess && (
+                              <>
+                                <div className="h-3 w-px bg-border" />
+                                <span className="text-[10px] text-success font-medium">Healthy</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
-              <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-                No recent activity
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Activity className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                <p className="text-sm font-medium text-foreground">No recent activity</p>
+                <p className="text-xs text-muted-foreground mt-1">Events will appear here as they occur</p>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Top Resource Consumers */}
+      {/* Top Resource Consumers - Redesigned with Table Layout */}
       <Card className="border-border bg-card">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <div>
-            <CardTitle className="text-sm font-medium text-foreground">Top Resource Consumers</CardTitle>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Servers with highest resource usage</p>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-medium text-foreground">Top Resource Consumers</CardTitle>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {topServers.length} servers with highest resource usage
+                {topServers.filter(s => s.status === 'critical').length > 0 && (
+                  <span className="ml-2 text-destructive font-semibold">
+                    • {topServers.filter(s => s.status === 'critical').length} critical
+                  </span>
+                )}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px] bg-transparent border-border hover:bg-accent"
+              onClick={() => onViewChange("servers")}
+            >
+              View All Servers <ArrowUpRight className="ml-1 h-3 w-3" />
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-[11px] bg-transparent border-border hover:bg-accent"
-            onClick={() => onViewChange("servers")}
-          >
-            View All Servers <ArrowUpRight className="ml-1 h-3 w-3" />
-          </Button>
         </CardHeader>
         <CardContent className="pt-0">
           {topServers.length > 0 ? (
-            <div className="space-y-2">
-              {topServers.map((server) => (
-                <div
-                  key={server.id}
-                  className="flex items-center gap-4 rounded-lg border border-transparent bg-secondary/40 px-4 py-3 transition-colors hover:border-border hover:bg-accent/40 cursor-pointer"
-                  onClick={() => onViewChange("servers")}
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      className={`h-2 w-2 shrink-0 rounded-full ${
-                        server.status === "running"
-                          ? "bg-success animate-pulse-dot"
-                          : server.status === "warning"
-                            ? "bg-warning"
-                            : "bg-destructive animate-pulse-dot"
+            <div className="rounded-lg border border-border overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3 w-8">#</th>
+                    <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3">Server</th>
+                    <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3">Status</th>
+                    <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3 w-32">CPU</th>
+                    <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3 w-32">Memory</th>
+                    <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3 w-32">Disk</th>
+                    <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-4 py-3 w-32">Inode</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {topServers.map((server, index) => (
+                    <tr
+                      key={server.id}
+                      className={`group transition-colors hover:bg-accent/30 cursor-pointer ${
+                        server.status === 'critical' ? 'bg-destructive/5' : ''
                       }`}
-                    />
-                    <span className="text-xs font-mono font-medium text-foreground truncate">
-                      {server.name}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground w-6">CPU</span>
-                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-secondary">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            server.cpu > 90 ? "bg-destructive" : server.cpu > 70 ? "bg-warning" : "bg-primary"
-                          }`}
-                          style={{ width: `${Math.min(server.cpu, 100)}%` }}
-                        />
-                      </div>
-                      <span
-                        className={`text-[11px] font-mono font-medium tabular-nums w-8 text-right ${
-                          server.cpu > 90
-                            ? "text-destructive"
-                            : server.cpu > 70
-                              ? "text-warning"
-                              : "text-foreground"
-                        }`}
-                      >
-                        {server.cpu.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="hidden sm:flex items-center gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground w-6">RAM</span>
-                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-secondary">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            server.ram > 90 ? "bg-destructive" : server.ram > 70 ? "bg-warning" : "bg-chart-2"
-                          }`}
-                          style={{ width: `${Math.min(server.ram, 100)}%` }}
-                        />
-                      </div>
-                      <span
-                        className={`text-[11px] font-mono font-medium tabular-nums w-8 text-right ${
-                          server.ram > 90
-                            ? "text-destructive"
-                            : server.ram > 70
-                              ? "text-warning"
-                              : "text-foreground"
-                        }`}
-                      >
-                        {server.ram.toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                      onClick={() => onViewChange("servers")}
+                    >
+                      {/* Rank */}
+                      <td className="px-4 py-3">
+                        <div className={`h-6 w-6 rounded-md flex items-center justify-center text-[10px] font-bold ${
+                          index === 0 ? 'bg-warning/20 text-warning border border-warning/30' :
+                          index === 1 ? 'bg-muted text-muted-foreground border border-border' :
+                          index === 2 ? 'bg-chart-3/20 text-chart-3 border border-chart-3/30' :
+                          'bg-secondary text-secondary-foreground border border-border'
+                        }`}>
+                          {index + 1}
+                        </div>
+                      </td>
+
+                      {/* Server Name */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`h-2 w-2 rounded-full shrink-0 ${
+                              server.status === "running"
+                                ? "bg-success animate-pulse-dot"
+                                : server.status === "warning"
+                                  ? "bg-warning"
+                                  : "bg-destructive animate-pulse-dot"
+                            }`}
+                          />
+                          <span className="text-sm font-mono font-semibold text-foreground group-hover:text-primary transition-colors truncate">
+                            {server.name}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Status Badge */}
+                      <td className="px-4 py-3">
+                        {server.status === 'critical' ? (
+                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-destructive/10 border border-destructive/30">
+                            <AlertTriangle className="h-3 w-3 text-destructive" />
+                            <span className="text-xs font-semibold text-destructive uppercase tracking-wider">Critical</span>
+                          </div>
+                        ) : server.status === 'warning' ? (
+                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-warning/10 border border-warning/30">
+                            <AlertTriangle className="h-3 w-3 text-warning" />
+                            <span className="text-xs font-semibold text-warning uppercase tracking-wider">Warning</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-success/10 border border-success/30">
+                            <CheckCircle2 className="h-3 w-3 text-success" />
+                            <span className="text-xs font-semibold text-success uppercase tracking-wider">Healthy</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* CPU */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2.5">
+                          <div className="h-2 w-20 overflow-hidden rounded-full bg-secondary/80">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                server.cpu > 90 ? "bg-destructive" : 
+                                server.cpu > 70 ? "bg-warning" : 
+                                "bg-primary"
+                              }`}
+                              style={{ width: `${Math.min(server.cpu, 100)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`text-xs font-mono font-bold tabular-nums min-w-[3rem] text-right ${
+                              server.cpu > 90 ? "text-destructive" :
+                              server.cpu > 70 ? "text-warning" :
+                              "text-foreground"
+                            }`}
+                          >
+                            {server.cpu.toFixed(1)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Memory */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2.5">
+                          <div className="h-2 w-20 overflow-hidden rounded-full bg-secondary/80">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                server.ram > 90 ? "bg-destructive" : 
+                                server.ram > 70 ? "bg-warning" : 
+                                "bg-chart-2"
+                              }`}
+                              style={{ width: `${Math.min(server.ram, 100)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`text-xs font-mono font-bold tabular-nums min-w-[3rem] text-right ${
+                              server.ram > 90 ? "text-destructive" :
+                              server.ram > 70 ? "text-warning" :
+                              "text-foreground"
+                            }`}
+                          >
+                            {server.ram.toFixed(1)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Disk */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2.5">
+                          <div className="h-2 w-20 overflow-hidden rounded-full bg-secondary/80">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                server.disk > 90 ? "bg-destructive" : 
+                                server.disk > 70 ? "bg-warning" : 
+                                "bg-success"
+                              }`}
+                              style={{ width: `${Math.min(server.disk, 100)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`text-xs font-mono font-bold tabular-nums min-w-[3rem] text-right ${
+                              server.disk > 90 ? "text-destructive" :
+                              server.disk > 70 ? "text-warning" :
+                              "text-foreground"
+                            }`}
+                          >
+                            {server.disk.toFixed(1)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Inode */}
+                      <td className="px-4 py-3">
+                        {server.inode > 0 ? (
+                          <div className="flex items-center justify-end gap-2.5">
+                            <div className="h-2 w-20 overflow-hidden rounded-full bg-secondary/80">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  server.inode > 90 ? "bg-destructive" : 
+                                  server.inode > 70 ? "bg-warning" : 
+                                  "bg-chart-3"
+                                }`}
+                                style={{ width: `${Math.min(server.inode, 100)}%` }}
+                              />
+                            </div>
+                            <span
+                              className={`text-xs font-mono font-bold tabular-nums min-w-[3rem] text-right ${
+                                server.inode > 90 ? "text-destructive" :
+                                server.inode > 70 ? "text-warning" :
+                                "text-foreground"
+                              }`}
+                            >
+                              {server.inode.toFixed(1)}%
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end">
+                            <span className="text-xs text-muted-foreground min-w-[3rem] text-right">-</span>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-              No metrics data available. Collect metrics to see top consumers.
+            <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-border bg-secondary/20">
+              <Server className="h-16 w-16 mb-4 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-foreground">No metrics data available</p>
+              <p className="text-xs text-muted-foreground mt-1">Collect metrics from servers to see top consumers</p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Services Overview */}
+      <ServicesOverview servers={metrics.servers} />
     </div>
   )
 }

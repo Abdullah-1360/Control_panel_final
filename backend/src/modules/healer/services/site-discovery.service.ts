@@ -155,14 +155,14 @@ export class SiteDiscoveryService {
   }
 
   /**
-   * Get list of cPanel users from /etc/trueuserdomains
+   * Get list of cPanel users from /etc/userdomains
    */
   private async getCpanelUsers(serverId: string): Promise<string[]> {
-    const command = `cat /etc/trueuserdomains | cut -d ':' -f 2 | sort -u`;
+    const command = `cat /etc/userdomains | cut -d ':' -f 2 | sort -u`;
     const result = await this.sshService.executeCommand(serverId, command);
 
     if (!result || result.trim() === '') {
-      throw new Error('Not a cPanel server or no access to /etc/trueuserdomains');
+      throw new Error('Not a cPanel server or no access to /etc/userdomains');
     }
 
     // Trim each username to remove leading/trailing spaces
@@ -242,8 +242,8 @@ export class SiteDiscoveryService {
    */
   private async getAllDomainsWithPaths(serverId: string): Promise<Array<{domain: string, path: string, username: string}>> {
     try {
-      // Step 1: Get all domains from trueuserdomains (1 SSH call)
-      const command = `cat /etc/trueuserdomains`;
+      // Step 1: Get PRIMARY domains from /etc/userdomains (NOT trueuserdomains)
+      const command = `cat /etc/userdomains`;
       const result = await this.sshService.executeCommand(serverId, command);
       
       const domainUserMap: Array<{domain: string, username: string}> = [];
@@ -259,7 +259,7 @@ export class SiteDiscoveryService {
         }
       }
       
-      this.logger.log(`Found ${domainUserMap.length} domains in trueuserdomains`);
+      this.logger.log(`Found ${domainUserMap.length} primary domains in /etc/userdomains`);
       
       // Step 2: Get ALL document roots in a single batch command (1 SSH call)
       const docRootMap = await this.getAllDocumentRootsBatch(serverId, domainUserMap);
@@ -292,28 +292,28 @@ export class SiteDiscoveryService {
   }
 
   /**
-   * Get document roots for ALL domains in a single batch SSH command
-   * This is 50-100x faster than individual calls
+   * Get document roots for ALL domains in batches to avoid timeout
+   * OPTIMIZED: Process in chunks of 50 domains with 60s timeout per chunk
    */
   private async getAllDocumentRootsBatch(
     serverId: string,
     domains: Array<{domain: string, username: string}>
   ): Promise<Map<string, string>> {
+    const allResults = new Map<string, string>();
+    const chunkSize = 50; // Process 50 domains at a time
+    
     try {
-      // Build batch command to get all document roots at once
-      // Use a simple for loop in bash to avoid command chaining validation
-      const chunkSize = 50;
-      const allResults = new Map<string, string>();
-      
+      // Process domains in chunks to avoid command length limits and timeouts
       for (let i = 0; i < domains.length; i += chunkSize) {
         const chunk = domains.slice(i, i + chunkSize);
+        this.logger.debug(`Processing chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(domains.length / chunkSize)} (${chunk.length} domains)`);
         
-        // Build a bash script that loops through domains
-        // This avoids command chaining detection while being efficient
+        // Build optimized batch command using for loop
         const domainList = chunk.map(d => `${d.domain}:${d.username}`).join(' ');
         const command = `for item in ${domainList}; do domain=\${item%%:*}; user=\${item##*:}; docroot=$(grep -E "^documentroot:" /var/cpanel/userdata/$user/$domain 2>/dev/null | cut -d: -f2- | xargs); [ -n "$docroot" ] && echo "$domain|$docroot"; done`;
         
-        const result = await this.sshService.executeCommand(serverId, command);
+        // Use 60-second timeout for each chunk
+        const result = await this.sshService.executeCommand(serverId, command, 60000);
         
         // Parse results
         for (const line of result.split('\n')) {
@@ -388,8 +388,8 @@ export class SiteDiscoveryService {
    */
   private async getAllUserDomains(serverId: string): Promise<Record<string, string>> {
     try {
-      // Read entire trueuserdomains file in one command
-      const command = `cat /etc/trueuserdomains`;
+      // Read /etc/userdomains (primary domains only)
+      const command = `cat /etc/userdomains`;
       const result = await this.sshService.executeCommand(serverId, command);
       
       // Parse the output: domain: username
@@ -411,7 +411,7 @@ export class SiteDiscoveryService {
       
       return userDomainMap;
     } catch (error) {
-      this.logger.warn('Failed to read trueuserdomains, using fallback');
+      this.logger.warn('Failed to read /etc/userdomains, using fallback');
       return {};
     }
   }
@@ -420,7 +420,7 @@ export class SiteDiscoveryService {
     serverId: string,
     username: string,
   ): Promise<string> {
-    const command = `grep ":${username}$" /etc/trueuserdomains | head -n 1 | cut -d ':' -f 1`;
+    const command = `grep ":${username}$" /etc/userdomains | head -n 1 | cut -d ':' -f 1`;
     const result = await this.sshService.executeCommand(serverId, command);
     return result.trim();
   }

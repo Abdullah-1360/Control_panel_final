@@ -5,7 +5,7 @@ import { LaravelPlugin } from '../plugins/laravel.plugin';
 import { PhpGenericPlugin } from '../plugins/php-generic.plugin';
 import { ExpressPlugin } from '../plugins/express.plugin';
 import { NextJsPlugin } from '../plugins/nextjs.plugin';
-// import { WordPressPlugin } from '../plugins/wordpress.plugin'; // Phase 4: Not needed yet
+import { WordPressPlugin } from '../plugins/wordpress.plugin';
 
 @Injectable()
 export class PluginRegistryService {
@@ -17,14 +17,14 @@ export class PluginRegistryService {
     private readonly phpGenericPlugin: PhpGenericPlugin,
     private readonly expressPlugin: ExpressPlugin,
     private readonly nextjsPlugin: NextJsPlugin,
-    // private readonly wordpressPlugin: WordPressPlugin, // Phase 4: Not needed yet
+    private readonly wordpressPlugin: WordPressPlugin,
   ) {
     this.registerPlugin('NODEJS', this.nodejsPlugin);
     this.registerPlugin('LARAVEL', this.laravelPlugin);
     this.registerPlugin('PHP_GENERIC', this.phpGenericPlugin);
     this.registerPlugin('EXPRESS', this.expressPlugin);
     this.registerPlugin('NEXTJS', this.nextjsPlugin);
-    // this.registerPlugin('WORDPRESS', this.wordpressPlugin); // Phase 4: WordPress already works via /api/v1/healer/sites
+    this.registerPlugin('WORDPRESS', this.wordpressPlugin);
   }
 
   private registerPlugin(techStack: string, plugin: IStackPlugin): void {

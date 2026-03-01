@@ -3,6 +3,8 @@
  * Base URL: http://localhost:3001/api/v1
  */
 
+import type { ServerMetrics, AggregatedMetrics } from '@/types/metrics';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 
 export class ApiError extends Error {
@@ -1107,36 +1109,31 @@ class ApiClient {
   // ============================================
 
   async collectServerMetrics(id: string) {
-    return this.request<any>(`/servers/${id}/metrics/collect`, {
+    return this.request<ServerMetrics>(`/servers/${id}/metrics/collect`, {
       method: 'POST',
     });
   }
 
   async getServerLatestMetrics(id: string) {
-    return this.request<any>(`/servers/${id}/metrics/latest`, {
+    return this.request<ServerMetrics>(`/servers/${id}/metrics/latest`, {
       method: 'GET',
     });
   }
 
   async getServerMetricsHistory(id: string, hours: number = 24) {
-    return this.request<any[]>(`/servers/${id}/metrics/history?hours=${hours}`, {
+    return this.request<ServerMetrics[]>(`/servers/${id}/metrics/history?hours=${hours}`, {
       method: 'GET',
     });
   }
 
   async getAggregatedMetrics() {
-    return this.request<{
-      avgCpuUsage: number;
-      avgMemoryUsage: number;
-      avgDiskUsage: number;
-      totalServers: number;
-      serversWithMetrics: number;
-      servers: Array<{
-        serverId: string;
-        serverName: string;
-        metrics: any;
-      }>;
-    }>('/servers/metrics/aggregate', {
+    return this.request<AggregatedMetrics>('/servers/metrics/aggregate', {
+      method: 'GET',
+    });
+  }
+
+  async getAggregatedMetricsHistory(hours: number = 2) {
+    return this.request<AggregatedMetricsHistoryPoint[]>(`/servers/metrics/aggregate/history?hours=${hours}`, {
       method: 'GET',
     });
   }
@@ -1323,6 +1320,74 @@ class ApiClient {
     }
     
     return this.request<T>(url, { ...restOptions, method: 'DELETE' });
+  }
+
+  // Discovery Queue endpoints
+  async enqueueDiscovery(serverId: string, data: {
+    forceRediscover?: boolean;
+    paths?: string[];
+    techStacks?: string[];
+  }) {
+    return this.request<{ jobId: string; message: string }>('/healer/applications/discover-queued', {
+      method: 'POST',
+      body: JSON.stringify({ serverId, ...data }),
+    });
+  }
+
+  async getDiscoveryProgress(jobId: string) {
+    return this.request<{
+      jobId: string;
+      serverId: string;
+      status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'PARTIAL';
+      progress: number;
+      currentStep: string;
+      applicationsFound: number;
+      applicationsProcessed: number;
+      errors: string[];
+      startedAt?: string;
+      completedAt?: string;
+    }>(`/healer/applications/discovery/${jobId}/progress`, {
+      method: 'GET',
+    });
+  }
+
+  async getDiscoveryStats() {
+    return this.request<{
+      discovery: {
+        waiting: number;
+        active: number;
+        completed: number;
+        failed: number;
+      };
+      metadata: {
+        waiting: number;
+        active: number;
+      };
+      subdomain: {
+        waiting: number;
+        active: number;
+      };
+    }>('/healer/applications/discovery/stats', {
+      method: 'GET',
+    });
+  }
+
+  async getRecentDiscoveries(limit?: number) {
+    const params = limit ? `?limit=${limit}` : '';
+    return this.request<Array<{
+      id: string;
+      serverId: string;
+      serverName: string;
+      triggeredBy: string;
+      status: string;
+      progress: number;
+      applicationsFound: number;
+      startedAt: string | null;
+      completedAt: string | null;
+      error?: string;
+    }>>(`/healer/applications/discovery/recent${params}`, {
+      method: 'GET',
+    });
   }
 }
 

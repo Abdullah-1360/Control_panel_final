@@ -5,10 +5,11 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { EncryptionModule } from '../encryption/encryption.module';
 import { AuditModule } from '../audit/audit.module';
 import { SSHConnectionService } from './ssh-connection.service';
+import { SSHSessionManager } from './ssh-session-manager.service';
 
 @Module({
   imports: [PrismaModule, EncryptionModule, AuditModule],
-  providers: [MetricsQueueService, ServerMetricsService, SSHConnectionService],
-  exports: [MetricsQueueService],
+  providers: [MetricsQueueService, ServerMetricsService, SSHConnectionService, SSHSessionManager],
+  exports: [MetricsQueueService, SSHSessionManager],
 })
 export class MetricsQueueModule {}

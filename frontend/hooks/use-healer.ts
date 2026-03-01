@@ -43,6 +43,8 @@ export function useDiagnostics(id: string, limit?: number) {
     queryKey: healerKeys.diagnostics(id),
     queryFn: () => healerApi.getDiagnostics(id, limit),
     enabled: !!id,
+    staleTime: 0, // Always consider data stale to ensure fresh fetches
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 }
 
@@ -125,6 +127,22 @@ export function useDiscoverApplications() {
   });
 }
 
+// Delete all applications for a server
+export function useDeleteServerApplications() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverId: string) => healerApi.deleteServerApplications(serverId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: healerKeys.applications() });
+      toast.success(`Deleted ${data.deletedCount} application(s)`);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to delete applications');
+    },
+  });
+}
+
 // Diagnose application
 export function useDiagnoseApplication() {
   const queryClient = useQueryClient();
@@ -133,9 +151,10 @@ export function useDiagnoseApplication() {
     mutationFn: ({ applicationId, subdomain }: { applicationId: string; subdomain?: string }) =>
       healerApi.diagnoseApplication(applicationId, { subdomain }),
     onSuccess: (_, variables) => {
+      // Invalidate and refetch diagnostics immediately
       queryClient.invalidateQueries({ queryKey: healerKeys.diagnostics(variables.applicationId) });
       queryClient.invalidateQueries({ queryKey: healerKeys.application(variables.applicationId) });
-      toast.success('Diagnosis started');
+      queryClient.invalidateQueries({ queryKey: healerKeys.healthScore(variables.applicationId) });
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to start diagnosis');

@@ -10,8 +10,8 @@ import { useRouter } from 'next/navigation';
 
 interface ApplicationCardProps {
   application: Application;
-  onDiagnose: (id: string) => void;
-  onConfigure: (id: string) => void;
+  onDiagnose: (id: string, techStack: string) => void;
+  onConfigure: (id: string, techStack: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -22,6 +22,15 @@ export function ApplicationCard({
   onDelete,
 }: ApplicationCardProps) {
   const router = useRouter();
+  
+  // Route WordPress applications to old healer, others to new healer
+  const handleViewDetails = () => {
+    if (application.techStack === 'WORDPRESS') {
+      router.push(`/healer/sites/${application.id}`);
+    } else {
+      router.push(`/healer/${application.id}`);
+    }
+  };
   
   return (
     <Card className="p-6 hover:shadow-lg transition-shadow">
@@ -100,7 +109,7 @@ export function ApplicationCard({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => router.push(`/healer/${application.id}`)}
+            onClick={handleViewDetails}
             className="flex-1"
           >
             <Eye className="h-4 w-4 mr-2" />
@@ -108,14 +117,14 @@ export function ApplicationCard({
           </Button>
           <Button
             size="sm"
-            onClick={() => onDiagnose(application.id)}
+            onClick={() => onDiagnose(application.id, application.techStack)}
           >
             <Activity className="h-4 w-4" />
           </Button>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => onConfigure(application.id)}
+            onClick={() => onConfigure(application.id, application.techStack)}
           >
             <Settings className="h-4 w-4" />
           </Button>

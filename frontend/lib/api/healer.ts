@@ -108,6 +108,10 @@ export const healerApi = {
     await apiClient.delete(`/healer/applications/${id}`);
   },
 
+  deleteServerApplications: async (serverId: string): Promise<{ deletedCount: number }> => {
+    return await apiClient.delete(`/healer/servers/${serverId}/applications`);
+  },
+
   discoverApplications: async (data: {
     serverId: string;
     techStacks?: string[];

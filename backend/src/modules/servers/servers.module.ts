@@ -3,6 +3,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ServersController } from './servers.controller';
 import { ServersService } from './servers.service';
 import { SSHConnectionService } from './ssh-connection.service';
+import { SSHSessionManager } from './ssh-session-manager.service';
 import { ServerMetricsService } from './server-metrics.service';
 import { MetricsQueueModule } from './metrics-queue.module';
 import { PrismaModule } from '../../prisma/prisma.module';
@@ -24,8 +25,8 @@ import { AuditModule } from '../audit/audit.module';
     ]),
   ],
   controllers: [ServersController],
-  providers: [ServersService, SSHConnectionService, ServerMetricsService],
-  exports: [ServersService, SSHConnectionService, ServerMetricsService],
+  providers: [ServersService, SSHConnectionService, SSHSessionManager, ServerMetricsService],
+  exports: [ServersService, SSHConnectionService, SSHSessionManager, ServerMetricsService],
 })
 export class ServersModule {}
 

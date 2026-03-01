@@ -408,8 +408,10 @@ export class ApplicationService {
    */
   private async getAllDomainsWithPaths(serverId: string): Promise<Array<{domain: string, path: string, username: string}>> {
     try {
-      // Step 1: Get all domains from trueuserdomains (1 SSH call)
-      const command = `cat /etc/trueuserdomains`;
+      // Step 1: Get PRIMARY domains from /etc/userdomains (NOT trueuserdomains)
+      // /etc/userdomains contains ONLY primary domains mapped to usernames
+      // /etc/trueuserdomains contains ALL domains (main + addon + subdomains) which causes duplicates
+      const command = `cat /etc/userdomains`;
       const result = await this.sshExecutor.executeCommand(serverId, command);
       
       const domainUserMap: Array<{domain: string, username: string}> = [];
@@ -425,7 +427,7 @@ export class ApplicationService {
         }
       }
       
-      this.logger.log(`Found ${domainUserMap.length} entries in trueuserdomains`);
+      this.logger.log(`Found ${domainUserMap.length} primary domains in /etc/userdomains`);
       
       // Step 2: Get ALL document roots in a single batch command (1 SSH call)
       const docRootMap = await this.getAllDocumentRootsBatch(serverId, domainUserMap);
@@ -458,38 +460,44 @@ export class ApplicationService {
   }
 
   /**
-   * Get document roots for ALL domains in a single batch SSH command
-   * COPIED from WordPress healer - this is 50-100x faster than individual calls
+   * Get document roots for ALL domains in batches to avoid timeout
+   * OPTIMIZED: Process in chunks of 50 domains with 60s timeout per chunk
    */
   private async getAllDocumentRootsBatch(
     serverId: string,
     domains: Array<{domain: string, username: string}>,
   ): Promise<Map<string, string>> {
     const docRootMap = new Map<string, string>();
+    const chunkSize = 50; // Process 50 domains at a time
     
     try {
-      // Build a batch command to check all userdata files at once
-      const userdataChecks = domains.map(({ domain, username }) => {
-        const userdataPath = `/var/cpanel/userdata/${username}/${domain}`;
-        return `if [ -f "${userdataPath}" ]; then echo "${domain}:$(grep -m 1 'documentroot:' ${userdataPath} | awk '{print $2}')"; fi`;
-      }).join('; ');
+      // Process domains in chunks to avoid command length limits and timeouts
+      for (let i = 0; i < domains.length; i += chunkSize) {
+        const chunk = domains.slice(i, i + chunkSize);
+        this.logger.debug(`Processing chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(domains.length / chunkSize)} (${chunk.length} domains)`);
+        
+        // Build optimized batch command using for loop instead of chaining
+        const domainList = chunk.map(d => `${d.domain}:${d.username}`).join(' ');
+        const command = `for item in ${domainList}; do domain=\${item%%:*}; user=\${item##*:}; docroot=$(grep -E "^documentroot:" /var/cpanel/userdata/$user/$domain 2>/dev/null | cut -d: -f2- | xargs); [ -n "$docroot" ] && echo "$domain|$docroot"; done`;
+        
+        // Use 60-second timeout for each chunk
+        const result = await this.sshExecutor.executeCommand(serverId, command, 60000);
       
-      const batchCommand = `bash -c '${userdataChecks}'`;
-      const result = await this.sshExecutor.executeCommand(serverId, batchCommand);
-      
-      if (result && result.trim()) {
-        const lines = result.trim().split('\n');
-        for (const line of lines) {
-          const [domain, docRoot] = line.split(':');
-          if (domain && docRoot && docRoot !== 'undefined') {
-            docRootMap.set(domain.trim(), docRoot.trim());
+        if (result && result.trim()) {
+          const lines = result.trim().split('\n');
+          for (const line of lines) {
+            const [domain, docRoot] = line.split('|');
+            if (domain && docRoot && docRoot.startsWith('/')) {
+              docRootMap.set(domain.trim(), docRoot.trim());
+            }
           }
         }
       }
       
       this.logger.log(`Got ${docRootMap.size} document roots from userdata files`);
     } catch (error) {
-      this.logger.warn('Failed to get document roots from userdata, will use fallback');
+      const err = error as Error;
+      this.logger.warn(`Failed to get document roots from userdata: ${err.message}`);
     }
     
     return docRootMap;
@@ -2173,6 +2181,61 @@ export class ApplicationService {
     } else {
       return 'DOWN';
     }
+  }
+
+  /**
+   * Public method to detect subdomains and addon domains for an application
+   * Used by subdomain detection processor
+   */
+  async detectSubdomainsForApplication(applicationId: string): Promise<{
+    subdomains: Array<{ domain: string; path: string; type: string }>;
+    addonDomains: Array<{ domain: string; path: string; type: string }>;
+    parkedDomains: Array<{ domain: string; path: string; type: string }>;
+  }> {
+    this.logger.log(`Detecting subdomains for application ${applicationId}`);
+
+    // Get application details
+    const application = await this.prisma.applications.findUnique({
+      where: { id: applicationId },
+      include: {
+        servers: true,
+      },
+    });
+
+    if (!application) {
+      throw new Error(`Application ${applicationId} not found`);
+    }
+
+    // Extract username from path (assuming cPanel structure: /home/username/...)
+    const pathParts = application.path.split('/');
+    const username = pathParts.length >= 3 && pathParts[1] === 'home' ? pathParts[2] : null;
+
+    if (!username) {
+      this.logger.warn(`Could not extract username from path: ${application.path}`);
+      return { subdomains: [], addonDomains: [], parkedDomains: [] };
+    }
+
+    // Detect all related domains
+    const allDomains = await this.detectSubdomainsAndAddons(
+      application.serverId,
+      username,
+      application.domain,
+    );
+
+    // Categorize domains
+    const subdomains = allDomains.filter(d => d.type === 'subdomain');
+    const addonDomains = allDomains.filter(d => d.type === 'addon');
+    const parkedDomains = allDomains.filter(d => d.type === 'parked');
+
+    this.logger.log(
+      `Detected for ${application.domain}: ${subdomains.length} subdomains, ${addonDomains.length} addon domains, ${parkedDomains.length} parked domains`,
+    );
+
+    return {
+      subdomains,
+      addonDomains,
+      parkedDomains,
+    };
   }
 
 }

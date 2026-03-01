@@ -41,12 +41,22 @@ export default function HealerPage() {
   // Delete mutation
   const deleteMutation = useDeleteApplication();
 
-  const handleDiagnose = (id: string) => {
-    router.push(`/healer/applications/${id}/diagnose`);
+  const handleDiagnose = (id: string, techStack: string) => {
+    // Route WordPress applications to the old WordPress healer
+    if (techStack === 'WORDPRESS') {
+      router.push(`/healer/sites/${id}`);
+    } else {
+      router.push(`/healer/applications/${id}/diagnose`);
+    }
   };
 
-  const handleConfigure = (id: string) => {
-    router.push(`/healer/applications/${id}/configure`);
+  const handleConfigure = (id: string, techStack: string) => {
+    // Route WordPress applications to the old WordPress healer
+    if (techStack === 'WORDPRESS') {
+      router.push(`/healer/sites/${id}`);
+    } else {
+      router.push(`/healer/applications/${id}/configure`);
+    }
   };
 
   const handleDelete = async (id: string) => {

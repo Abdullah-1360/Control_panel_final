@@ -8,7 +8,8 @@
  * Max 5 concurrent SSH connections, 100ms delay between commands
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { SSHSessionManager } from '../../servers/ssh-session-manager.service';
 import { SSHConnectionService, SSHConnectionConfig } from '../../servers/ssh-connection.service';
 import { EncryptionService } from '../../encryption/encryption.service';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -52,17 +53,35 @@ class Semaphore {
 }
 
 @Injectable()
-export class SSHExecutorService {
+export class SSHExecutorService implements OnModuleDestroy {
   private readonly logger = new Logger(SSHExecutorService.name);
   private readonly MAX_CONCURRENT = 5; // Max 5 concurrent SSH connections
   private readonly DELAY_BETWEEN_COMMANDS = 100; // 100ms delay
   private semaphore = new Semaphore(this.MAX_CONCURRENT);
+  private cleanupInterval: NodeJS.Timeout;
   
   constructor(
+    private readonly sessionManager: SSHSessionManager,
     private readonly sshService: SSHConnectionService,
     private readonly encryptionService: EncryptionService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) {
+    // Start connection pool cleanup (every 5 minutes)
+    this.cleanupInterval = setInterval(() => {
+      this.sshService.cleanupPool().catch((error) => {
+        this.logger.error(`Connection pool cleanup failed: ${error.message}`);
+      });
+    }, 5 * 60 * 1000);
+  }
+  
+  /**
+   * Cleanup on module destroy
+   */
+  onModuleDestroy() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+  }
   
   /**
    * Execute a command on a server (backward compatible - returns string)
@@ -82,7 +101,7 @@ export class SSHExecutorService {
   
   /**
    * Execute a command on a server (returns detailed result)
-   * OPTIMIZED: Uses semaphore to limit concurrent connections and prevent server flooding
+   * OPTIMIZED: Uses centralized session manager for maximum connection reuse
    */
   async executeCommandDetailed(
     serverId: string,
@@ -93,38 +112,8 @@ export class SSHExecutorService {
     await this.semaphore.acquire();
     
     try {
-      // Add small delay to prevent flooding
-      await this.delay(this.DELAY_BETWEEN_COMMANDS);
-      
-      // Get server from database
-      const server = await this.prisma.servers.findUnique({
-        where: { id: serverId },
-      });
-      
-      if (!server) {
-        return {
-          success: false,
-          error: `Server ${serverId} not found`,
-          exitCode: 1,
-        };
-      }
-      
-      // Build SSH config from server credentials
-      const config = await this.buildSSHConfig(server, timeout);
-      
-      // Execute command
-      const result = await this.sshService.executeCommand(
-        config,
-        server.id,
-        command,
-      );
-      
-      return {
-        success: result.success,
-        output: result.output,
-        error: result.error,
-        exitCode: result.success ? 0 : 1,
-      };
+      // Use centralized session manager for maximum reusability
+      return await this.sessionManager.executeCommand(serverId, command, timeout);
     } catch (error: any) {
       this.logger.error(`Command execution failed: ${error.message}`);
       return {
@@ -139,6 +128,76 @@ export class SSHExecutorService {
   }
   
   /**
+   * Execute command on an existing SSH client
+   */
+  private async executeCommandOnClient(
+    client: any,
+    command: string,
+    timeout: number,
+  ): Promise<CommandResult> {
+    return new Promise((resolve) => {
+      const timeoutHandle = setTimeout(() => {
+        resolve({
+          success: false,
+          error: `Command timeout after ${timeout}ms`,
+          exitCode: 124,
+        });
+      }, timeout);
+      
+      client.exec(command, (err: Error, stream: any) => {
+        if (err) {
+          clearTimeout(timeoutHandle);
+          resolve({
+            success: false,
+            error: err.message,
+            exitCode: 1,
+          });
+          return;
+        }
+        
+        let output = '';
+        let errorOutput = '';
+        
+        stream.on('data', (data: Buffer) => {
+          output += data.toString();
+        });
+        
+        stream.stderr.on('data', (data: Buffer) => {
+          errorOutput += data.toString();
+        });
+        
+        stream.on('close', (code: number) => {
+          clearTimeout(timeoutHandle);
+          
+          if (code === 0) {
+            resolve({
+              success: true,
+              output: output,
+              exitCode: 0,
+            });
+          } else {
+            resolve({
+              success: false,
+              output: output,
+              error: errorOutput || `Command exited with code ${code}`,
+              exitCode: code,
+            });
+          }
+        });
+        
+        stream.on('error', (streamErr: Error) => {
+          clearTimeout(timeoutHandle);
+          resolve({
+            success: false,
+            error: streamErr.message,
+            exitCode: 1,
+          });
+        });
+      });
+    });
+  }
+  
+  /**
    * Delay helper for rate limiting
    */
   private delay(ms: number): Promise<void> {
@@ -146,26 +205,22 @@ export class SSHExecutorService {
   }
   
   /**
-   * Execute multiple commands sequentially
+   * Execute multiple commands sequentially (reuses same session)
    */
   async executeCommands(
     serverId: string,
     commands: string[],
     timeout: number = 30000,
   ): Promise<CommandResult[]> {
-    const results: CommandResult[] = [];
+    // Acquire semaphore once for all commands
+    await this.semaphore.acquire();
     
-    for (const command of commands) {
-      const result = await this.executeCommandDetailed(serverId, command, timeout);
-      results.push(result);
-      
-      // Stop on first failure
-      if (!result.success) {
-        break;
-      }
+    try {
+      // Use session manager to execute all commands on same session
+      return await this.sessionManager.executeCommands(serverId, commands, timeout);
+    } finally {
+      this.semaphore.release();
     }
-    
-    return results;
   }
   
   /**

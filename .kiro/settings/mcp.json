@@ -5,7 +5,8 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-everything"
-      ]
+      ],
+      "disabled": false
     },
     "sequential-thinking": {
       "command": "npx",
@@ -52,7 +53,7 @@
     "devtools": {
       "command": "npx",
       "args": [
-        "-y",
+        "-y","--headless","--isolated",
         "chrome-devtools-mcp@latest"
       ],
       "autoApprove": [
@@ -61,7 +62,7 @@
         "new_page",
         "list_pages"
       ],
-      "disabled": true
+      "disabled": false
     },
     "postgres": {
       "command": "docker",

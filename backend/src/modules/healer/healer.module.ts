@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
+import { BullModule as BullMQModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 import { HealerController } from './healer.controller';
 import { HealerService } from './healer.service';
@@ -18,6 +19,7 @@ import { WsodHealerRunbook } from './runbooks/wsod-healer.runbook';
 import { MaintenanceHealerRunbook } from './runbooks/maintenance-healer.runbook';
 import { PrismaService } from './stubs/prisma.service.stub';
 import { ServersModule } from '../servers/servers.module';
+import { AuditModule } from '../audit/audit.module';
 // Phase 1: Intelligence Services
 import { VerificationService } from './services/verification.service';
 import { MetricsService } from './services/metrics.service';
@@ -41,6 +43,12 @@ import { TechStackDetectorService } from './services/tech-stack-detector.service
 import { HealingStrategyEngineService } from './services/healing-strategy-engine.service';
 import { CircuitBreakerService } from './services/circuit-breaker.service';
 import { BackupRollbackService } from './services/backup-rollback.service';
+// Universal Healer: Discovery Queue System
+import { DiscoveryQueueService } from './services/discovery-queue.service';
+import { DiscoveryProcessor } from './processors/discovery.processor';
+import { MetadataCollectionProcessor } from './processors/metadata-collection.processor';
+import { SubdomainDetectionProcessor } from './processors/subdomain-detection.processor';
+import { TechStackDetectionProcessor } from './processors/techstack-detection.processor';
 // Universal Healer: Plugins
 import { NodeJsPlugin } from './plugins/nodejs.plugin';
 import { LaravelPlugin } from './plugins/laravel.plugin';
@@ -48,16 +56,29 @@ import { PhpGenericPlugin } from './plugins/php-generic.plugin';
 import { ExpressPlugin } from './plugins/express.plugin';
 import { NextJsPlugin } from './plugins/nextjs.plugin';
 import { MySQLPlugin } from './plugins/mysql.plugin';
-// import { WordPressPlugin } from './plugins/wordpress.plugin'; // Phase 4: Not needed yet
+import { WordPressPlugin } from './plugins/wordpress.plugin';
 // Universal Healer: Controllers
 import { ApplicationController } from './controllers/application.controller';
 
 @Module({
   imports: [
     ServersModule, // Import Module 2 for SSH functionality
+    AuditModule, // Import audit module for logging
     ScheduleModule.forRoot(), // For cron jobs in MetricsService
     BullModule.registerQueue({
       name: 'healer-jobs',
+    }),
+    BullMQModule.registerQueue({
+      name: 'healer-discovery',
+    }),
+    BullMQModule.registerQueue({
+      name: 'healer-metadata-collection',
+    }),
+    BullMQModule.registerQueue({
+      name: 'healer-subdomain-detection',
+    }),
+    BullMQModule.registerQueue({
+      name: 'healer-techstack-detection',
     }),
   ],
   controllers: [
@@ -105,6 +126,12 @@ import { ApplicationController } from './controllers/application.controller';
     HealingStrategyEngineService,
     CircuitBreakerService,
     BackupRollbackService,
+    // Universal Healer: Discovery Queue System
+    DiscoveryQueueService,
+    DiscoveryProcessor,
+    MetadataCollectionProcessor,
+    SubdomainDetectionProcessor,
+    TechStackDetectionProcessor,
     // Universal Healer: Plugins
     NodeJsPlugin,
     LaravelPlugin,
@@ -112,8 +139,8 @@ import { ApplicationController } from './controllers/application.controller';
     ExpressPlugin,
     NextJsPlugin,
     MySQLPlugin,
-    // WordPressPlugin, // Phase 4: Not needed yet - WordPress works via /api/v1/healer/sites
+    WordPressPlugin,
   ],
-  exports: [HealerService, UnifiedDiagnosisService, ApplicationService],
+  exports: [HealerService, UnifiedDiagnosisService, ApplicationService, DiscoveryQueueService],
 })
 export class HealerModule {}

@@ -518,6 +518,18 @@ export class ServersService {
       data: { deletedAt: new Date() },
     });
 
+    // Emit server deleted event for cleanup
+    await this.eventBus.emit({
+      type: SystemEvent.SERVER_DELETED,
+      data: {
+        serverId: id,
+        serverName: server.name,
+        deletedBy: userId,
+        force,
+      },
+      timestamp: new Date(),
+    });
+
     // Audit log
     await this.audit.log({
       userId,
@@ -566,12 +578,32 @@ export class ServersService {
       },
     });
 
+    // Query applications (Universal Healer - discovered sites/apps)
+    const applications = await this.prisma.applications.findMany({
+      where: {
+        serverId: id,
+      },
+      select: {
+        id: true,
+        domain: true,
+        path: true,
+        techStack: true,
+        techStackVersion: true,
+        healthStatus: true,
+        healthScore: true,
+        isHealerEnabled: true,
+        lastHealthCheck: true,
+      },
+      orderBy: {
+        domain: 'asc',
+      },
+    });
+
     // TODO: Query other dependencies when modules are implemented
-    // - Sites (Module 4)
     // - Incidents (Module 6)
     // - Jobs (Module 5)
 
-    const hasDependencies = integrations.length > 0;
+    const hasDependencies = integrations.length > 0 || applications.length > 0;
 
     return {
       serverId: id,
@@ -581,7 +613,10 @@ export class ServersService {
           count: integrations.length,
           items: integrations,
         },
-        sites: { count: 0, items: [] },
+        applications: {
+          count: applications.length,
+          items: applications,
+        },
         incidents: { count: 0, items: [] },
         jobs: { count: 0, items: [] },
       },

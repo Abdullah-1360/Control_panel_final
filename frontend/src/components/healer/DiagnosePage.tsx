@@ -39,32 +39,43 @@ export function DiagnosePage({
   const diagnoseMutation = useDiagnoseApplication();
   
   // Fetch existing diagnostics
-  const { data: diagnosticsData, refetch } = useDiagnostics(application.id);
+  const { data: diagnosticsData, refetch, isLoading: isLoadingDiagnostics } = useDiagnostics(application.id);
   const results = diagnosticsData?.results || [];
+
+  // Debug: Log when results change
+  useEffect(() => {
+    console.log('Diagnostics data updated:', diagnosticsData);
+    console.log('Results count:', results.length);
+    console.log('Results:', results);
+  }, [diagnosticsData, results.length]);
 
   const handleRunDiagnosis = async () => {
     setIsRunning(true);
     try {
-      await diagnoseMutation.mutateAsync({
-        id: application.id,
-        data: {},
-      });
-      
       toast({
         title: 'Diagnosis Started',
         description: 'Running diagnostic checks...',
       });
+
+      const result = await diagnoseMutation.mutateAsync({
+        applicationId: application.id,
+        subdomain: undefined,
+      });
       
-      // Wait a bit then refetch
-      setTimeout(async () => {
-        await refetch();
-        setIsRunning(false);
-        toast({
-          title: 'Diagnosis Complete',
-          description: 'Diagnostic results updated',
-        });
-      }, 2000);
+      console.log('Diagnosis result:', result);
+      
+      // Immediately refetch to get the latest results
+      const refetchResult = await refetch();
+      console.log('Refetch result:', refetchResult);
+      
+      setIsRunning(false);
+      
+      toast({
+        title: 'Diagnosis Complete',
+        description: `${result.checksExecuted || 0} checks executed successfully`,
+      });
     } catch (error: any) {
+      console.error('Diagnosis error:', error);
       toast({
         title: 'Diagnosis Failed',
         description: error.message || 'Failed to run diagnosis',
@@ -196,7 +207,16 @@ export function DiagnosePage({
       )}
 
       {/* Diagnostic Results */}
-      {results.length > 0 ? (
+      {isLoadingDiagnostics ? (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center py-8">
+              <RefreshCw className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50 animate-spin" />
+              <p className="text-muted-foreground">Loading diagnostic results...</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : results.length > 0 ? (
         <DiagnosticCheckList 
           checks={transformedChecks} 
           applicationId={application.id}

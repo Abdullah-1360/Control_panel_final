@@ -421,7 +421,7 @@ describe('ServersService', () => {
       const result = await service.checkDependencies('server-123');
 
       expect(result.hasDependencies).toBe(false);
-      expect(result.dependencies.sites.count).toBe(0);
+      expect(result.dependencies.applications.count).toBe(0);
     });
   });
 });

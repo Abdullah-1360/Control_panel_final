@@ -12,8 +12,8 @@ interface ApplicationListProps {
     totalPages: number;
   };
   onPageChange: (page: number) => void;
-  onDiagnose: (id: string) => void;
-  onConfigure: (id: string) => void;
+  onDiagnose: (id: string, techStack: string) => void;
+  onConfigure: (id: string, techStack: string) => void;
   onDelete: (id: string) => void;
 }
 

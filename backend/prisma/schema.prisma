@@ -518,6 +518,11 @@ model server_metrics {
   diskReadMBps       Float?
   diskWriteMBps      Float?
   diskIops           Int?
+  inodeTotal         BigInt?
+  inodeUsed          BigInt?
+  inodeFree          BigInt?
+  inodeUsagePercent  Float?
+  diskBreakdown      Json?
   networkRxMBps      Float?
   networkTxMBps      Float?
   networkRxTotalMB   Float?
@@ -527,6 +532,7 @@ model server_metrics {
   threadCount        Int?
   detectedOS         String?
   kernelVersion      String?
+  services           Json?
   collectionLatency  Int
   collectionSuccess  Boolean  @default(true)
   collectionError    String?
@@ -535,6 +541,23 @@ model server_metrics {
 
   @@index([collectedAt])
   @@index([serverId, collectedAt])
+}
+
+model aggregated_metrics_history {
+  id                 String   @id @default(uuid())
+  avgCpuUsage        Float
+  avgMemoryUsage     Float
+  avgDiskUsage       Float
+  avgInodeUsage      Float?
+  totalServers       Int
+  serversWithMetrics Int
+  totalStorageGB     Float?
+  usedStorageGB      Float?
+  totalNetworkRxMB   Float?
+  totalNetworkTxMB   Float?
+  collectedAt        DateTime @default(now())
+
+  @@index([collectedAt])
 }
 
 model server_test_history {
@@ -971,6 +994,8 @@ model applications {
   techStackVersion        String?               @map("tech_stack_version")
   detectionMethod         DetectionMethod       @default(AUTO) @map("detection_method")
   detectionConfidence     Float                 @default(0.0) @map("detection_confidence") // 0.0 to 1.0
+  detectionAttempts       Int                   @default(0) @map("detection_attempts") // Track failed detection attempts
+  lastDetectionAttempt    DateTime?             @map("last_detection_attempt")
   
   // Health & Status
   healthStatus            HealthStatus          @default(UNKNOWN) @map("health_status")
@@ -1008,6 +1033,7 @@ model applications {
   @@index([isHealerEnabled])
   @@index([serverId])
   @@index([circuitBreakerState])
+  @@index([detectionAttempts])
   @@map("applications")
 }
 

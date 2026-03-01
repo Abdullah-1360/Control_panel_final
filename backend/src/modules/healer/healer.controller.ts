@@ -93,6 +93,21 @@ export class HealerController {
   }
 
   /**
+   * DELETE /api/v1/healer/servers/:serverId/applications
+   * Delete all applications for a specific server
+   */
+  @Delete('servers/:serverId/applications')
+  // @Permissions('healer.admin') // TODO: Enable when Module 1 is integrated
+  @HttpCode(HttpStatus.OK)
+  async deleteServerApplications(@Param('serverId') serverId: string) {
+    const result = await this.healerService.deleteServerApplications(serverId);
+    return { 
+      data: result,
+      message: `Deleted ${result.deletedCount} applications for server ${serverId}`
+    };
+  }
+
+  /**
    * GET /api/v1/healer/sites
    * List all sites with filtering
    */
@@ -116,6 +131,27 @@ export class HealerController {
     };
 
     return this.healerService.listSites(filters);
+  }
+
+  /**
+   * GET /api/v1/healer/applications/problematic
+   * Get applications with UNKNOWN tech stack after 5+ detection attempts
+   */
+  @Get('applications/problematic')
+  // @Permissions('healer.read') // TODO: Enable when Module 1 is integrated
+  async getProblematicApplications(
+    @Query('minAttempts') minAttempts?: string,
+    @Query('serverId') serverId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.healerService.getProblematicApplications({
+      minAttempts: minAttempts ? parseInt(minAttempts) : 5,
+      serverId,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+    });
+    return { data: result };
   }
 
   /**

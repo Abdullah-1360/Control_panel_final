@@ -36,6 +36,46 @@ export class HealerService {
   }
 
   /**
+   * Delete all applications for a specific server
+   * Removes both wp_sites and applications entries
+   */
+  async deleteServerApplications(serverId: string): Promise<{ deletedCount: number }> {
+    this.logger.log(`Deleting all applications for server ${serverId}`);
+    
+    try {
+      // Delete from wp_sites (WordPress healer)
+      const wpSitesDeleted = await this.prisma.wp_sites.deleteMany({
+        where: { serverId },
+      });
+      
+      // Delete from applications (Universal healer)
+      // First delete diagnostic results (foreign key constraint)
+      await this.prisma.diagnostic_results.deleteMany({
+        where: {
+          applications: {
+            serverId,
+          },
+        },
+      });
+      
+      // Then delete applications
+      const applicationsDeleted = await this.prisma.applications.deleteMany({
+        where: { serverId },
+      });
+      
+      const totalDeleted = wpSitesDeleted.count + applicationsDeleted.count;
+      
+      this.logger.log(`Deleted ${totalDeleted} applications for server ${serverId} (${wpSitesDeleted.count} wp_sites, ${applicationsDeleted.count} applications)`);
+      
+      return { deletedCount: totalDeleted };
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Failed to delete applications for server ${serverId}: ${err.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * List all sites with filtering
    */
   async listSites(filters?: {
@@ -107,6 +147,78 @@ export class HealerService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Get applications with UNKNOWN tech stack after multiple detection attempts
+   * These are problematic applications that need manual review
+   */
+  async getProblematicApplications(filters: {
+    minAttempts?: number;
+    serverId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<any> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const skip = (page - 1) * limit;
+    const minAttempts = filters.minAttempts || 5;
+
+    const where: any = {
+      techStack: 'UNKNOWN',
+      detectionAttempts: {
+        gte: minAttempts,
+      },
+      servers: {
+        deletedAt: null, // Exclude soft-deleted servers
+      },
+    };
+
+    if (filters.serverId) {
+      where.serverId = filters.serverId;
+    }
+
+    const [applications, total] = await Promise.all([
+      this.prisma.applications.findMany({
+        where,
+        include: {
+          servers: {
+            select: {
+              id: true,
+              name: true,
+              host: true,
+              platformType: true,
+            },
+          },
+        },
+        orderBy: [
+          { detectionAttempts: 'desc' },
+          { lastDetectionAttempt: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+      this.prisma.applications.count({ where }),
+    ]);
+
+    this.logger.log(
+      `Found ${applications.length} problematic applications (${total} total) with ${minAttempts}+ detection attempts`,
+    );
+
+    return {
+      applications,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+      summary: {
+        totalProblematic: total,
+        minAttempts,
+        message: `Applications with UNKNOWN tech stack after ${minAttempts}+ detection attempts`,
       },
     };
   }

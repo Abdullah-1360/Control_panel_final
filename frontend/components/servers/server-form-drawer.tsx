@@ -57,8 +57,8 @@ import { useCreateServer, useUpdateServer, useServer } from "@/hooks/use-servers
 import type { Server, CreateServerInput, UpdateServerInput } from "@/lib/types/server"
 import { toast } from "sonner"
 
-// Form validation schema
-const serverFormSchema = z.object({
+// Create schema factory function that accepts isEditMode parameter
+const createServerFormSchema = (isEditMode: boolean) => z.object({
   // Identity
   name: z.string().min(3, "Name must be at least 3 characters").max(100),
   environment: z.string().optional(),
@@ -100,34 +100,53 @@ const serverFormSchema = z.object({
   
   // Metrics Configuration
   metricsEnabled: z.boolean().optional(),
-  metricsInterval: z.coerce.number().min(60).max(3600).optional(),
-  alertCpuThreshold: z.coerce.number().min(1).max(100).optional(),
-  alertRamThreshold: z.coerce.number().min(1).max(100).optional(),
-  alertDiskThreshold: z.coerce.number().min(1).max(100).optional(),
-  isEditMode: z.boolean().optional(), // Add flag to track edit mode
-}).refine((data) => {
+  metricsInterval: z.coerce.number().int().min(60).max(3600).optional(),
+  alertCpuThreshold: z.coerce.number().int().min(1).max(100).optional(),
+  alertRamThreshold: z.coerce.number().int().min(1).max(100).optional(),
+  alertDiskThreshold: z.coerce.number().int().min(1).max(100).optional(),
+}).superRefine((data, ctx) => {
   // Skip credential validation in edit mode (credentials are optional when updating)
-  if (data.isEditMode) {
-    return true;
+  if (isEditMode) {
+    return;
   }
   
   // Validate auth type requirements only in create mode
   if (data.authType === "SSH_KEY" && !data.privateKey) {
-    return false
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Private key is required for SSH key authentication",
+      path: ["privateKey"],
+    });
   }
-  if (data.authType === "SSH_KEY_WITH_PASSPHRASE" && (!data.privateKey || !data.passphrase)) {
-    return false
+  
+  if (data.authType === "SSH_KEY_WITH_PASSPHRASE") {
+    if (!data.privateKey) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Private key is required",
+        path: ["privateKey"],
+      });
+    }
+    if (!data.passphrase) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Passphrase is required for this auth type",
+        path: ["passphrase"],
+      });
+    }
   }
+  
   if (data.authType === "PASSWORD" && !data.password) {
-    return false
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Password is required for password authentication",
+      path: ["password"],
+    });
   }
-  return true
-}, {
-  message: "Required credentials missing for selected auth type",
-  path: ["authType"],
 })
 
-type ServerFormValues = z.infer<typeof serverFormSchema>
+// Type inference from the schema
+type ServerFormValues = z.infer<ReturnType<typeof createServerFormSchema>>
 
 interface ServerFormDrawerProps {
   open: boolean
@@ -160,7 +179,7 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
   const updateMutation = useUpdateServer()
 
   const form = useForm<ServerFormValues>({
-    resolver: zodResolver(serverFormSchema),
+    resolver: zodResolver(createServerFormSchema(isEditMode)),
     defaultValues: {
       name: "",
       environment: "",
@@ -185,7 +204,6 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
       alertCpuThreshold: 90,
       alertRamThreshold: 95,
       alertDiskThreshold: 90,
-      isEditMode: false, // Default to create mode
     },
   })
 
@@ -219,7 +237,6 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
         alertCpuThreshold: serverData.alertCpuThreshold || 90,
         alertRamThreshold: serverData.alertRamThreshold || 95,
         alertDiskThreshold: serverData.alertDiskThreshold || 90,
-        isEditMode: true, // Set edit mode flag
       })
     } else if (!isEditMode && open) {
       // Reset to default values when opening in create mode
@@ -247,7 +264,6 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
         alertCpuThreshold: 90,
         alertRamThreshold: 95,
         alertDiskThreshold: 90,
-        isEditMode: false,
       })
     }
   }, [isEditMode, serverData, open, form])
@@ -288,8 +304,6 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
     setSuccessMessage(null)
     
     try {
-      console.log('[ServerForm] Submitting with values:', { ...values, privateKey: values.privateKey ? '[REDACTED]' : undefined, password: values.password ? '[REDACTED]' : undefined });
-      
       const credentials: any = {}
       let hasCredentials = false;
       
@@ -343,9 +357,7 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
           updatePayload.credentials = credentials;
         }
 
-        console.log('[ServerForm] Update payload:', { ...updatePayload, credentials: hasCredentials ? '[REDACTED]' : undefined });
         const result = await updateMutation.mutateAsync({ id: serverId!, data: updatePayload })
-        console.log('[ServerForm] Update successful:', result);
         setSuccessMessage(`Server "${values.name}" updated successfully!`)
         if (onSuccess) onSuccess(result)
       } else {
@@ -374,9 +386,7 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
           alertDiskThreshold: values.alertDiskThreshold,
         };
 
-        console.log('[ServerForm] Create payload:', { ...createPayload, credentials: '[REDACTED]' });
         const result = await createMutation.mutateAsync(createPayload)
-        console.log('[ServerForm] Create successful:', result);
         setSuccessMessage(`Server "${values.name}" created successfully!`)
         if (onSuccess) onSuccess(result)
         form.reset()
@@ -1251,9 +1261,16 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
           </Button>
           <div className="flex items-center gap-2">
             {Object.keys(form.formState.errors).length > 0 && (
-              <span className="text-xs text-destructive">
-                Please fix {Object.keys(form.formState.errors).length} validation error(s)
-              </span>
+              <div className="text-xs text-destructive flex flex-col items-end gap-1">
+                <span className="font-medium">
+                  {Object.keys(form.formState.errors).length} validation error(s)
+                </span>
+                {Object.entries(form.formState.errors).slice(0, 3).map(([key, error]) => (
+                  <span key={key} className="text-[10px]">
+                    {key}: {error?.message?.toString() || 'Invalid value'}
+                  </span>
+                ))}
+              </div>
             )}
             {successMessage && (
               <Button type="button" variant="outline" size="sm">
@@ -1263,7 +1280,22 @@ export function ServerFormDrawer({ open, onOpenChange, serverId, onSuccess }: Se
             )}
             <Button
               type="button"
-              onClick={form.handleSubmit(onSubmit)}
+              onClick={async () => {
+                // Trigger validation manually first
+                const isValid = await form.trigger();
+                
+                if (isValid) {
+                  form.handleSubmit(
+                    onSubmit,
+                    (errors) => {
+                      console.error('[ServerForm] Validation errors:', errors);
+                      toast.error('Please fix validation errors before submitting');
+                    }
+                  )();
+                } else {
+                  toast.error('Please fix validation errors before submitting');
+                }
+              }}
               disabled={createMutation.isPending || updateMutation.isPending}
             >
               {(createMutation.isPending || updateMutation.isPending) && (

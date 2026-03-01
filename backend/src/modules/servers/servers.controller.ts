@@ -210,6 +210,17 @@ export class ServersController {
     return this.metricsService.getAggregatedMetrics();
   }
 
+  @Get('metrics/aggregate/history')
+  @RequirePermissions('servers', 'read')
+  @ApiOperation({ summary: 'Get aggregated metrics history' })
+  @ApiQuery({ name: 'hours', required: false, description: 'Number of hours of history (default: 2)' })
+  @ApiResponse({ status: 200, description: 'Aggregated metrics history retrieved successfully' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  async getAggregatedMetricsHistory(@Query('hours') hours?: string) {
+    const hoursNum = hours ? parseInt(hours) : 2;
+    return this.metricsService.getAggregatedMetricsHistory(hoursNum);
+  }
+
   // ============================================
   // QUEUE MANAGEMENT ENDPOINTS
   // ============================================

@@ -7,6 +7,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -18,8 +28,8 @@ import {
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TechStackBadge } from './TechStackBadge';
-import { useDiscoverApplications } from '@/hooks/use-healer';
-import { Loader2, Search } from 'lucide-react';
+import { useDiscoverApplications, useDeleteServerApplications } from '@/hooks/use-healer';
+import { Loader2, Search, Trash2 } from 'lucide-react';
 import { TECH_STACKS } from '@/lib/tech-stacks';
 
 interface DiscoverApplicationsModalProps {
@@ -36,6 +46,10 @@ export function DiscoverApplicationsModal({
   const [serverId, setServerId] = useState<string>('');
   const [autoDetect, setAutoDetect] = useState(true);
   const [selectedTechStacks, setSelectedTechStacks] = useState<string[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const discoverMutation = useDiscoverApplications();
+  const deleteMutation = useDeleteServerApplications();
 
   const discoverMutation = useDiscoverApplications();
 
@@ -56,6 +70,13 @@ export function DiscoverApplicationsModal({
     onClose();
   };
 
+  const handleDeleteAll = async () => {
+    if (!serverId) return;
+
+    await deleteMutation.mutateAsync(serverId);
+    setShowDeleteConfirm(false);
+  };
+
   const toggleTechStack = (techStack: string) => {
     setSelectedTechStacks((prev) =>
       prev.includes(techStack)
@@ -63,6 +84,8 @@ export function DiscoverApplicationsModal({
         : [...prev, techStack],
     );
   };
+
+  const selectedServer = servers.find(s => s.id === serverId);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -145,27 +168,72 @@ export function DiscoverApplicationsModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={discoverMutation.isPending}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDiscover}
-            disabled={!serverId || discoverMutation.isPending}
-          >
-            {discoverMutation.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Discovering...
-              </>
-            ) : (
-              <>
-                <Search className="mr-2 h-4 w-4" />
-                Discover
-              </>
-            )}
-          </Button>
+          <div className="flex w-full justify-between">
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={!serverId || deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete All
+                </>
+              )}
+            </Button>
+            
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onClose} disabled={discoverMutation.isPending}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDiscover}
+                disabled={!serverId || discoverMutation.isPending}
+              >
+                {discoverMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Discovering...
+                  </>
+                ) : (
+                  <>
+                    <Search className="mr-2 h-4 w-4" />
+                    Discover
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </DialogFooter>
       </DialogContent>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete All Applications?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all applications for server{' '}
+              <span className="font-semibold">{selectedServer?.name}</span>.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAll}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

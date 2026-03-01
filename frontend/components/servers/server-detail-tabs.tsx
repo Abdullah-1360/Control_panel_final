@@ -504,11 +504,64 @@ export function ServerDetailTabs({ serverId }: ServerDetailTabsProps) {
                         </div>
                       )}
 
-                      {/* Sites (placeholder for Module 4) */}
-                      {dependencies.dependencies.sites && dependencies.dependencies.sites.count > 0 && (
+                      {/* Applications (Universal Healer - Discovered Sites/Apps) */}
+                      {dependencies.dependencies.applications && dependencies.dependencies.applications.count > 0 && (
                         <div>
-                          <h4 className="text-sm font-semibold mb-2">Sites ({dependencies.dependencies.sites.count})</h4>
-                          <p className="text-xs text-muted-foreground">Sites hosted on this server</p>
+                          <h4 className="text-sm font-semibold mb-3">
+                            Discovered Applications ({dependencies.dependencies.applications.count})
+                          </h4>
+                          <div className="space-y-2">
+                            {dependencies.dependencies.applications.items.map((app: any) => (
+                              <div
+                                key={app.id}
+                                className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div>
+                                    <p className="text-sm font-medium font-mono">{app.domain}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {app.techStack} {app.techStackVersion && `v${app.techStackVersion}`} • {app.path}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {app.healthScore !== null && (
+                                    <Badge
+                                      variant={
+                                        app.healthScore >= 80
+                                          ? "default"
+                                          : app.healthScore >= 60
+                                          ? "secondary"
+                                          : "destructive"
+                                      }
+                                      className="text-xs"
+                                    >
+                                      Score: {app.healthScore}
+                                    </Badge>
+                                  )}
+                                  <Badge
+                                    variant={
+                                      app.healthStatus === "HEALTHY"
+                                        ? "default"
+                                        : app.healthStatus === "DEGRADED"
+                                        ? "secondary"
+                                        : app.healthStatus === "DOWN"
+                                        ? "destructive"
+                                        : "outline"
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {app.healthStatus}
+                                  </Badge>
+                                  {app.isHealerEnabled && (
+                                    <Badge variant="outline" className="text-xs">
+                                      Healer Enabled
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
