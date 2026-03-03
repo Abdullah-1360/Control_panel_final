@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DiagnosticCheckList } from './DiagnosticCheckList';
+import { DiagnosisProgressModal } from './diagnosis-progress-modal';
 import { 
   RefreshCw, 
   Activity, 
@@ -35,6 +36,8 @@ export function DiagnosePage({
 }: DiagnosePageProps) {
   const { toast } = useToast();
   const [isRunning, setIsRunning] = useState(false);
+  const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
   
   const diagnoseMutation = useDiagnoseApplication();
   
@@ -52,11 +55,6 @@ export function DiagnosePage({
   const handleRunDiagnosis = async () => {
     setIsRunning(true);
     try {
-      toast({
-        title: 'Diagnosis Started',
-        description: 'Running diagnostic checks...',
-      });
-
       const result = await diagnoseMutation.mutateAsync({
         applicationId: application.id,
         subdomain: undefined,
@@ -64,16 +62,28 @@ export function DiagnosePage({
       
       console.log('Diagnosis result:', result);
       
-      // Immediately refetch to get the latest results
-      const refetchResult = await refetch();
-      console.log('Refetch result:', refetchResult);
-      
-      setIsRunning(false);
-      
-      toast({
-        title: 'Diagnosis Complete',
-        description: `${result.checksExecuted || 0} checks executed successfully`,
-      });
+      // Check if diagnosisId is returned (for real-time progress tracking)
+      if (result.diagnosisId) {
+        setDiagnosisId(result.diagnosisId);
+        setShowProgress(true);
+      } else {
+        // Fallback to old behavior if diagnosisId not available
+        toast({
+          title: 'Diagnosis Started',
+          description: 'Running diagnostic checks...',
+        });
+        
+        // Immediately refetch to get the latest results
+        const refetchResult = await refetch();
+        console.log('Refetch result:', refetchResult);
+        
+        setIsRunning(false);
+        
+        toast({
+          title: 'Diagnosis Complete',
+          description: `${result.checksExecuted || 0} checks executed successfully`,
+        });
+      }
     } catch (error: any) {
       console.error('Diagnosis error:', error);
       toast({
@@ -83,6 +93,13 @@ export function DiagnosePage({
       });
       setIsRunning(false);
     }
+  };
+
+  const handleProgressComplete = async () => {
+    // Refetch diagnostics when progress modal completes
+    await refetch();
+    setIsRunning(false);
+    setShowProgress(false);
   };
 
   // Calculate statistics
@@ -242,6 +259,20 @@ export function DiagnosePage({
             </div>
           </CardContent>
         </Card>
+      )}
+      
+      {/* Progress Modal */}
+      {diagnosisId && (
+        <DiagnosisProgressModal
+          open={showProgress}
+          onClose={() => {
+            setShowProgress(false);
+            setIsRunning(false);
+          }}
+          diagnosisId={diagnosisId}
+          siteName={application.domain}
+          onComplete={handleProgressComplete}
+        />
       )}
     </div>
   );

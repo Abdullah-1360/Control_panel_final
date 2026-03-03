@@ -63,6 +63,10 @@ export class DiagnosisService {
         wpConfigCheck,
         memoryLimit,
         sslCheck,
+        securityKeys,
+        absolutePath,
+        cronConfig,
+        fileEditingPerms,
       ] = await Promise.all([
         this.logAnalysis.analyzeLogs(serverId, sitePath, domain),
         this.checkMaintenanceMode(serverId, sitePath, commandOutputs),
@@ -82,6 +86,11 @@ export class DiagnosisService {
         this.checkWpConfig(serverId, sitePath, commandOutputs),
         this.checkMemoryLimit(serverId, sitePath, commandOutputs),
         this.checkSSL(domain, commandOutputs, serverId),
+        // PHASE 1 - LAYER 3: Configuration Validation
+        this.validateSecurityKeys(serverId, sitePath, commandOutputs),
+        this.validateAbsolutePath(serverId, sitePath, commandOutputs),
+        this.validateCronConfiguration(serverId, sitePath, commandOutputs),
+        this.checkFileEditingPermissions(serverId, sitePath, commandOutputs),
       ]);
 
       const totalDuration = Date.now() - startTime;
@@ -1214,6 +1223,455 @@ export class DiagnosisService {
         duration: Date.now() - startTime,
       });
       return { limit: 'Unknown', sufficient: false };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 3: Validate WordPress security keys and salts
+   */
+  private async validateSecurityKeys(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<{
+    allKeysPresent: boolean;
+    weakKeys: string[];
+    missingKeys: string[];
+    defaultKeys: string[];
+  }> {
+    const startTime = Date.now();
+    try {
+      const requiredKeys = [
+        'AUTH_KEY',
+        'SECURE_AUTH_KEY',
+        'LOGGED_IN_KEY',
+        'NONCE_KEY',
+        'AUTH_SALT',
+        'SECURE_AUTH_SALT',
+        'LOGGED_IN_SALT',
+        'NONCE_SALT',
+      ];
+
+      const missingKeys: string[] = [];
+      const weakKeys: string[] = [];
+      const defaultKeys: string[] = [];
+
+      // Read wp-config.php
+      const configCommand = `cat ${sitePath}/wp-config.php`;
+      const configContent = await this.sshService.executeCommand(serverId, configCommand, 15000);
+
+      for (const key of requiredKeys) {
+        // Check if key exists
+        const keyRegex = new RegExp(`define\\s*\\(\\s*['"]${key}['"]\\s*,\\s*['"]([^'"]+)['"]\\s*\\)`, 'i');
+        const match = configContent.match(keyRegex);
+
+        if (!match) {
+          missingKeys.push(key);
+          continue;
+        }
+
+        const keyValue = match[1];
+
+        // Check for default/placeholder values
+        const defaultPhrases = [
+          'put your unique phrase here',
+          'unique phrase',
+          'change this',
+          'your-key-here',
+          'replace-this',
+        ];
+
+        if (defaultPhrases.some(phrase => keyValue.toLowerCase().includes(phrase))) {
+          defaultKeys.push(key);
+          continue;
+        }
+
+        // Check key length (should be at least 64 characters for good entropy)
+        if (keyValue.length < 64) {
+          weakKeys.push(key);
+        }
+      }
+
+      const allKeysPresent = missingKeys.length === 0 && defaultKeys.length === 0 && weakKeys.length === 0;
+
+      let output = `Security Keys Check:\n`;
+      output += `Total keys: ${requiredKeys.length}\n`;
+      output += `Missing: ${missingKeys.length}\n`;
+      output += `Default/Placeholder: ${defaultKeys.length}\n`;
+      output += `Weak (<64 chars): ${weakKeys.length}\n`;
+
+      if (!allKeysPresent) {
+        if (missingKeys.length > 0) {
+          output += `\n❌ Missing keys: ${missingKeys.join(', ')}`;
+        }
+        if (defaultKeys.length > 0) {
+          output += `\n❌ Default/placeholder keys: ${defaultKeys.join(', ')}`;
+        }
+        if (weakKeys.length > 0) {
+          output += `\n⚠️ Weak keys: ${weakKeys.join(', ')}`;
+        }
+        output += `\n\n💡 Generate new keys at: https://api.wordpress.org/secret-key/1.1/salt/`;
+      } else {
+        output += `\n✅ All security keys are properly configured`;
+      }
+
+      commandOutputs.push({
+        command: 'Security Keys Validation (Layer 3)',
+        output,
+        success: allKeysPresent,
+        duration: Date.now() - startTime,
+      });
+
+      return {
+        allKeysPresent,
+        weakKeys,
+        missingKeys,
+        defaultKeys,
+      };
+    } catch (error) {
+      const err = error as Error;
+      commandOutputs.push({
+        command: 'Security Keys Validation',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+      return {
+        allKeysPresent: false,
+        weakKeys: [],
+        missingKeys: [],
+        defaultKeys: [],
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 3: Validate ABSPATH configuration
+   */
+  private async validateAbsolutePath(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<{
+    valid: boolean;
+    configuredPath: string;
+    actualPath: string;
+    issue?: string;
+  }> {
+    const startTime = Date.now();
+    try {
+      // Extract ABSPATH from wp-config.php
+      const configCommand = `grep "ABSPATH" ${sitePath}/wp-config.php | grep -v "^\\s*//" | head -1`;
+      const configResult = await this.sshService.executeCommand(serverId, configCommand, 10000);
+
+      // Parse ABSPATH value
+      const abspathMatch = configResult.match(/define\s*\(\s*['"]ABSPATH['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
+      
+      if (!abspathMatch) {
+        // Check for dirname(__FILE__) pattern
+        const dirnameMatch = configResult.match(/define\s*\(\s*['"]ABSPATH['"]\s*,\s*dirname\s*\(\s*__FILE__\s*\)\s*\.\s*['"]([^'"]*)['"]\s*\)/i);
+        
+        if (dirnameMatch) {
+          const configuredPath = `${sitePath}${dirnameMatch[1]}`;
+          
+          commandOutputs.push({
+            command: 'ABSPATH Validation (Layer 3)',
+            output: `ABSPATH uses dirname(__FILE__) pattern\nResolved to: ${configuredPath}\n✅ Valid dynamic path configuration`,
+            success: true,
+            duration: Date.now() - startTime,
+          });
+
+          return {
+            valid: true,
+            configuredPath,
+            actualPath: sitePath,
+          };
+        }
+
+        commandOutputs.push({
+          command: 'ABSPATH Validation',
+          output: '❌ ABSPATH not found in wp-config.php',
+          success: false,
+          duration: Date.now() - startTime,
+        });
+
+        return {
+          valid: false,
+          configuredPath: 'NOT_FOUND',
+          actualPath: sitePath,
+          issue: 'ABSPATH not defined',
+        };
+      }
+
+      const configuredPath = abspathMatch[1];
+
+      // Verify path resolution matches actual installation path
+      const resolvedCommand = `cd ${sitePath} && php -r "define('ABSPATH', '${configuredPath}'); echo realpath(ABSPATH);" 2>/dev/null || echo "ERROR"`;
+      const resolvedPath = (await this.sshService.executeCommand(serverId, resolvedCommand, 10000)).trim();
+
+      const actualRealPath = (await this.sshService.executeCommand(serverId, `realpath ${sitePath}`, 10000)).trim();
+
+      const valid = resolvedPath === actualRealPath && resolvedPath !== 'ERROR';
+
+      let output = `ABSPATH Validation:\n`;
+      output += `Configured: ${configuredPath}\n`;
+      output += `Resolved: ${resolvedPath}\n`;
+      output += `Actual: ${actualRealPath}\n`;
+
+      if (!valid) {
+        output += `\n❌ ABSPATH mismatch - this can break WordPress includes`;
+        output += `\n💡 Update ABSPATH in wp-config.php to match actual path`;
+      } else {
+        output += `\n✅ ABSPATH correctly configured`;
+      }
+
+      commandOutputs.push({
+        command: 'ABSPATH Validation (Layer 3)',
+        output,
+        success: valid,
+        duration: Date.now() - startTime,
+      });
+
+      return {
+        valid,
+        configuredPath,
+        actualPath: actualRealPath,
+        issue: valid ? undefined : 'Path mismatch',
+      };
+    } catch (error) {
+      const err = error as Error;
+      commandOutputs.push({
+        command: 'ABSPATH Validation',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+      return {
+        valid: false,
+        configuredPath: 'UNKNOWN',
+        actualPath: sitePath,
+        issue: err.message,
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 3: Validate WordPress cron configuration
+   */
+  private async validateCronConfiguration(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<{
+    wpCronDisabled: boolean;
+    systemCronExists: boolean;
+    systemCronCorrect: boolean;
+    cronFrequency?: string;
+    missedSchedules: number;
+    issues: string[];
+  }> {
+    const startTime = Date.now();
+    try {
+      const issues: string[] = [];
+
+      // Check DISABLE_WP_CRON setting
+      const disableCommand = `grep "DISABLE_WP_CRON" ${sitePath}/wp-config.php | grep -v "^\\s*//" | grep "true" 2>/dev/null`;
+      const disableResult = await this.sshService.executeCommand(serverId, disableCommand, 10000);
+      const wpCronDisabled = disableResult.trim() !== '';
+
+      let systemCronExists = false;
+      let systemCronCorrect = false;
+      let cronFrequency = 'N/A';
+
+      if (wpCronDisabled) {
+        // Check if system cron exists
+        const cronCommand = `crontab -l 2>/dev/null | grep "wp-cron.php" || echo "NOT_FOUND"`;
+        const cronResult = await this.sshService.executeCommand(serverId, cronCommand, 10000);
+        systemCronExists = !cronResult.includes('NOT_FOUND');
+
+        if (systemCronExists) {
+          // Verify cron is calling wp-cron.php correctly
+          const cronLine = cronResult.trim();
+          systemCronCorrect = cronLine.includes('wp-cron.php') && 
+                             (cronLine.includes('curl') || cronLine.includes('wget') || cronLine.includes('php'));
+
+          // Extract frequency (simplified)
+          const frequencyMatch = cronLine.match(/^(\*\/\d+|\d+|\*)\s+(\*|\d+)\s+(\*|\d+)\s+(\*|\d+)\s+(\*|\d+)/);
+          if (frequencyMatch) {
+            const minutes = frequencyMatch[1];
+            if (minutes === '*') {
+              cronFrequency = 'Every minute';
+            } else if (minutes.startsWith('*/')) {
+              cronFrequency = `Every ${minutes.substring(2)} minutes`;
+            } else {
+              cronFrequency = `At minute ${minutes}`;
+            }
+          }
+
+          if (!systemCronCorrect) {
+            issues.push('System cron exists but may not be configured correctly');
+          }
+        } else {
+          issues.push('DISABLE_WP_CRON is true but no system cron found');
+        }
+      } else {
+        // WP-Cron is enabled, check if wp-cron.php is accessible
+        const wpCronCommand = `test -f ${sitePath}/wp-cron.php && echo "EXISTS" || echo "NOT_FOUND"`;
+        const wpCronResult = await this.sshService.executeCommand(serverId, wpCronCommand, 10000);
+        
+        if (wpCronResult.trim() === 'NOT_FOUND') {
+          issues.push('wp-cron.php file not found');
+        }
+      }
+
+      // Check for missed scheduled posts/events
+      let missedSchedules = 0;
+      try {
+        const missedCommand = `cd ${sitePath} && wp cron event list --format=count --allow-root 2>/dev/null || echo "0"`;
+        const missedResult = await this.sshService.executeCommand(serverId, missedCommand, 15000);
+        missedSchedules = parseInt(missedResult.trim()) || 0;
+
+        if (missedSchedules > 10) {
+          issues.push(`${missedSchedules} scheduled events pending (possible cron issue)`);
+        }
+      } catch (error) {
+        // wp-cli might not be available, skip this check
+      }
+
+      // Check wp_options for cron bloat
+      try {
+        const cronBloatCommand = `cd ${sitePath} && wp db query "SELECT LENGTH(option_value) as size FROM wp_options WHERE option_name = 'cron'" --allow-root 2>/dev/null | tail -n +2`;
+        const cronBloatResult = await this.sshService.executeCommand(serverId, cronBloatCommand, 15000);
+        const cronSize = parseInt(cronBloatResult.trim()) || 0;
+
+        if (cronSize > 100000) {
+          issues.push(`Cron option is bloated (${(cronSize / 1024).toFixed(2)}KB)`);
+        }
+      } catch (error) {
+        // Skip if query fails
+      }
+
+      let output = `WordPress Cron Configuration:\n`;
+      output += `DISABLE_WP_CRON: ${wpCronDisabled ? 'true' : 'false'}\n`;
+      
+      if (wpCronDisabled) {
+        output += `System cron exists: ${systemCronExists ? 'Yes' : 'No'}\n`;
+        if (systemCronExists) {
+          output += `System cron correct: ${systemCronCorrect ? 'Yes' : 'No'}\n`;
+          output += `Frequency: ${cronFrequency}\n`;
+        }
+      } else {
+        output += `Using WordPress built-in cron\n`;
+      }
+
+      output += `Pending events: ${missedSchedules}\n`;
+
+      if (issues.length > 0) {
+        output += `\n⚠️ Issues:\n${issues.map(i => `  - ${i}`).join('\n')}`;
+      } else {
+        output += `\n✅ Cron configuration is correct`;
+      }
+
+      const success = issues.length === 0;
+
+      commandOutputs.push({
+        command: 'Cron Configuration Validation (Layer 3)',
+        output,
+        success,
+        duration: Date.now() - startTime,
+      });
+
+      return {
+        wpCronDisabled,
+        systemCronExists,
+        systemCronCorrect,
+        cronFrequency,
+        missedSchedules,
+        issues,
+      };
+    } catch (error) {
+      const err = error as Error;
+      commandOutputs.push({
+        command: 'Cron Configuration Validation',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+      return {
+        wpCronDisabled: false,
+        systemCronExists: false,
+        systemCronCorrect: false,
+        missedSchedules: 0,
+        issues: [err.message],
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 3: Check file editing permissions
+   */
+  private async checkFileEditingPermissions(
+    serverId: string,
+    sitePath: string,
+    commandOutputs: any[],
+  ): Promise<{
+    fileEditDisabled: boolean;
+    fileModsDisabled: boolean;
+    isSecure: boolean;
+  }> {
+    const startTime = Date.now();
+    try {
+      // Check DISALLOW_FILE_EDIT
+      const fileEditCommand = `grep "DISALLOW_FILE_EDIT" ${sitePath}/wp-config.php | grep -v "^\\s*//" | grep "true" 2>/dev/null`;
+      const fileEditResult = await this.sshService.executeCommand(serverId, fileEditCommand, 10000);
+      const fileEditDisabled = fileEditResult.trim() !== '';
+
+      // Check DISALLOW_FILE_MODS (more restrictive - disables plugin/theme installation)
+      const fileModsCommand = `grep "DISALLOW_FILE_MODS" ${sitePath}/wp-config.php | grep -v "^\\s*//" | grep "true" 2>/dev/null`;
+      const fileModsResult = await this.sshService.executeCommand(serverId, fileModsCommand, 10000);
+      const fileModsDisabled = fileModsResult.trim() !== '';
+
+      const isSecure = fileEditDisabled || fileModsDisabled;
+
+      let output = `File Editing Permissions:\n`;
+      output += `DISALLOW_FILE_EDIT: ${fileEditDisabled ? 'true (secure)' : 'false (insecure)'}\n`;
+      output += `DISALLOW_FILE_MODS: ${fileModsDisabled ? 'true (most secure)' : 'false'}\n`;
+
+      if (!isSecure) {
+        output += `\n⚠️ File editing is enabled in WordPress admin`;
+        output += `\n💡 Add to wp-config.php: define('DISALLOW_FILE_EDIT', true);`;
+        output += `\n💡 For maximum security: define('DISALLOW_FILE_MODS', true);`;
+      } else if (fileModsDisabled) {
+        output += `\n✅ Maximum security: File editing and modifications disabled`;
+      } else {
+        output += `\n✅ File editing disabled (theme/plugin editor not accessible)`;
+      }
+
+      commandOutputs.push({
+        command: 'File Editing Permissions Check (Layer 3)',
+        output,
+        success: isSecure,
+        duration: Date.now() - startTime,
+      });
+
+      return {
+        fileEditDisabled,
+        fileModsDisabled,
+        isSecure,
+      };
+    } catch (error) {
+      const err = error as Error;
+      commandOutputs.push({
+        command: 'File Editing Permissions Check',
+        output: `Failed: ${err.message}`,
+        success: false,
+        duration: Date.now() - startTime,
+      });
+      return {
+        fileEditDisabled: false,
+        fileModsDisabled: false,
+        isSecure: false,
+      };
     }
   }
 

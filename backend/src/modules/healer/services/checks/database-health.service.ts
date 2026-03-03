@@ -103,6 +103,68 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         recommendations.push('Verify database server is running');
       }
 
+      // 9. PHASE 1 - LAYER 4: Advanced corruption detection
+      const corruptionCheck = await this.checkTableCorruption(serverId, sitePath);
+      if (corruptionCheck.corruptedTables.length > 0) {
+        issues.push(`${corruptionCheck.corruptedTables.length} corrupted tables detected`);
+        score -= Math.min(40, corruptionCheck.corruptedTables.length * 10);
+        recommendations.push('CRITICAL: Repair corrupted tables immediately');
+        recommendations.push('Run: wp db repair --allow-root');
+        recommendations.push(`Affected tables: ${corruptionCheck.corruptedTables.join(', ')}`);
+      }
+      if (corruptionCheck.tablesNeedingRepair.length > 0) {
+        issues.push(`${corruptionCheck.tablesNeedingRepair.length} tables need repair`);
+        score -= Math.min(20, corruptionCheck.tablesNeedingRepair.length * 5);
+        recommendations.push('Run table repair: wp db repair --allow-root');
+      }
+
+      // 10. PHASE 1 - LAYER 4: Query performance analysis
+      const queryPerformance = await this.analyzeQueryPerformance(serverId, sitePath);
+      if (queryPerformance.slowQueriesCount > 100) {
+        issues.push(`${queryPerformance.slowQueriesCount} slow queries detected`);
+        score -= 15;
+        recommendations.push('Optimize slow queries');
+        recommendations.push('Consider adding database indexes');
+      }
+      if (queryPerformance.missingIndexes.length > 0) {
+        issues.push(`${queryPerformance.missingIndexes.length} tables missing critical indexes`);
+        score -= 10;
+        recommendations.push(`Add indexes to: ${queryPerformance.missingIndexes.join(', ')}`);
+      }
+
+      // 11. PHASE 1 - LAYER 4: Orphaned transients detection
+      const transientsCheck = await this.detectOrphanedTransients(serverId, sitePath);
+      if (transientsCheck.cleanupRecommended) {
+        issues.push(`${transientsCheck.expiredTransients} expired transients (${transientsCheck.bloatSizeMB.toFixed(2)}MB bloat)`);
+        score -= 15;
+        recommendations.push('Clean up expired transients immediately');
+        recommendations.push('Run: wp transient delete --expired --allow-root');
+      }
+
+      // 12. PHASE 1 - LAYER 4: Auto-increment capacity check
+      const autoIncrementCheck = await this.checkAutoIncrementCapacity(serverId, sitePath);
+      if (autoIncrementCheck.tablesAtRisk.length > 0) {
+        const critical = autoIncrementCheck.tablesAtRisk.filter(t => t.percentUsed > 95).length;
+        issues.push(`${autoIncrementCheck.tablesAtRisk.length} tables approaching auto-increment limit (${critical} critical)`);
+        score -= Math.min(30, critical * 15 + (autoIncrementCheck.tablesAtRisk.length - critical) * 5);
+        recommendations.push('CRITICAL: Tables approaching MAXINT - imminent failure risk');
+        recommendations.push('Convert affected tables to BIGINT immediately');
+        for (const table of autoIncrementCheck.tablesAtRisk) {
+          recommendations.push(`${table.table}: ${table.percentUsed.toFixed(1)}% capacity used`);
+        }
+      }
+
+      // 13. PHASE 1 - LAYER 4: Database growth tracking
+      const growthTracking = await this.trackDatabaseGrowth(serverId, sitePath);
+      if (growthTracking.currentSizeMB > 5000) {
+        issues.push(`Large database: ${growthTracking.currentSizeMB.toFixed(2)}MB`);
+        score -= 10;
+        recommendations.push('Consider database optimization and archiving old data');
+        if (growthTracking.largestTables.length > 0) {
+          recommendations.push(`Largest tables: ${growthTracking.largestTables.slice(0, 3).map(t => `${t.table} (${t.sizeMB.toFixed(2)}MB)`).join(', ')}`);
+        }
+      }
+
       // Determine status
       let status: CheckStatus;
       if (score >= 85) {
@@ -132,6 +194,12 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
           autoDrafts,
           spamComments,
           connectionTest,
+          // Phase 1 - Layer 4 additions
+          corruptionCheck,
+          queryPerformance,
+          transientsCheck,
+          autoIncrementCheck,
+          growthTracking,
           issues,
         },
         recommendations,
@@ -315,8 +383,315 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
     }
   }
 
+  /**
+   * PHASE 1 - LAYER 4: Advanced corruption detection using CHECK TABLE
+   */
+  private async checkTableCorruption(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    corruptedTables: string[];
+    tablesNeedingRepair: string[];
+    totalChecked: number;
+  }> {
+    try {
+      const corruptedTables: string[] = [];
+      const tablesNeedingRepair: string[] = [];
+
+      // Get all WordPress tables
+      const tablesCommand = `cd ${sitePath} && wp db query "SHOW TABLES" --allow-root 2>/dev/null | tail -n +2`;
+      const tablesResult = await this.sshExecutor.executeCommand(serverId, tablesCommand, 20000);
+      const tables = tablesResult.trim().split('\n').filter(t => t);
+
+      // Run CHECK TABLE on each table
+      for (const table of tables) {
+        const checkCommand = `cd ${sitePath} && wp db query "CHECK TABLE ${table}" --allow-root 2>/dev/null`;
+        const checkResult = await this.sshExecutor.executeCommand(serverId, checkCommand, 15000);
+
+        // Parse result - looking for "error", "corrupt", or "crashed"
+        if (checkResult.toLowerCase().includes('error') || 
+            checkResult.toLowerCase().includes('corrupt') ||
+            checkResult.toLowerCase().includes('crashed')) {
+          corruptedTables.push(table);
+        }
+
+        // Check if table needs repair (MyISAM specific)
+        if (checkResult.toLowerCase().includes('repair')) {
+          tablesNeedingRepair.push(table);
+        }
+      }
+
+      // Also check information_schema for tables marked as crashed
+      const crashedCommand = `cd ${sitePath} && wp db query "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_COMMENT LIKE '%crashed%'" --allow-root 2>/dev/null | tail -n +2`;
+      const crashedResult = await this.sshExecutor.executeCommand(serverId, crashedCommand, 15000);
+      const crashedTables = crashedResult.trim().split('\n').filter(t => t);
+
+      for (const table of crashedTables) {
+        if (!corruptedTables.includes(table)) {
+          corruptedTables.push(table);
+        }
+      }
+
+      return {
+        corruptedTables,
+        tablesNeedingRepair,
+        totalChecked: tables.length,
+      };
+    } catch (error) {
+      this.logger.warn(`Table corruption check failed: ${(error as Error).message}`);
+      return {
+        corruptedTables: [],
+        tablesNeedingRepair: [],
+        totalChecked: 0,
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 4: Analyze query performance using slow query log
+   */
+  private async analyzeQueryPerformance(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    slowQueriesCount: number;
+    slowestQueries: Array<{ query: string; time: number }>;
+    missingIndexes: string[];
+  }> {
+    try {
+      // Check if slow query log is enabled
+      const slowLogCommand = `cd ${sitePath} && wp db query "SHOW VARIABLES LIKE 'slow_query_log'" --allow-root 2>/dev/null | tail -n +2`;
+      const slowLogResult = await this.sshExecutor.executeCommand(serverId, slowLogCommand, 10000);
+
+      if (!slowLogResult.includes('ON')) {
+        this.logger.warn('Slow query log is not enabled');
+        return {
+          slowQueriesCount: 0,
+          slowestQueries: [],
+          missingIndexes: [],
+        };
+      }
+
+      // Get slow query log file path
+      const logFileCommand = `cd ${sitePath} && wp db query "SHOW VARIABLES LIKE 'slow_query_log_file'" --allow-root 2>/dev/null | tail -n +2 | awk '{print $2}'`;
+      const logFile = (await this.sshExecutor.executeCommand(serverId, logFileCommand, 10000)).trim();
+
+      if (!logFile) {
+        return {
+          slowQueriesCount: 0,
+          slowestQueries: [],
+          missingIndexes: [],
+        };
+      }
+
+      // Parse slow query log for queries related to this database
+      // This is a simplified implementation - production would use mysqldumpslow or pt-query-digest
+      const slowQueriesCommand = `grep -c "Query_time" ${logFile} 2>/dev/null || echo "0"`;
+      const slowQueriesCount = parseInt((await this.sshExecutor.executeCommand(serverId, slowQueriesCommand, 10000)).trim());
+
+      // Get top 5 slowest queries (simplified)
+      const slowestQueries: Array<{ query: string; time: number }> = [];
+
+      // Check for missing indexes on common WordPress tables
+      const missingIndexes: string[] = [];
+      const indexCheckCommand = `cd ${sitePath} && wp db query "SELECT DISTINCT TABLE_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND INDEX_NAME = 'PRIMARY'" --allow-root 2>/dev/null | tail -n +2`;
+      const tablesWithPK = (await this.sshExecutor.executeCommand(serverId, indexCheckCommand, 15000)).trim().split('\n');
+
+      // Check if critical tables have indexes
+      const criticalTables = ['wp_posts', 'wp_postmeta', 'wp_options', 'wp_comments', 'wp_users'];
+      for (const table of criticalTables) {
+        if (!tablesWithPK.includes(table)) {
+          missingIndexes.push(`${table} (missing primary key)`);
+        }
+      }
+
+      return {
+        slowQueriesCount,
+        slowestQueries,
+        missingIndexes,
+      };
+    } catch (error) {
+      this.logger.warn(`Query performance analysis failed: ${(error as Error).message}`);
+      return {
+        slowQueriesCount: 0,
+        slowestQueries: [],
+        missingIndexes: [],
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 4: Detect orphaned transients and calculate cleanup potential
+   */
+  private async detectOrphanedTransients(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    totalTransients: number;
+    expiredTransients: number;
+    bloatSizeMB: number;
+    cleanupRecommended: boolean;
+  }> {
+    try {
+      // Count total transients
+      const totalCommand = `cd ${sitePath} && wp db query "SELECT COUNT(*) FROM wp_options WHERE option_name LIKE '_transient_%'" --allow-root 2>/dev/null | tail -n +2`;
+      const totalResult = await this.sshExecutor.executeCommand(serverId, totalCommand, 15000);
+      const totalTransients = parseInt(totalResult.trim()) || 0;
+
+      // Count expired transients
+      const expiredCommand = `cd ${sitePath} && wp db query "SELECT COUNT(*) FROM wp_options WHERE option_name LIKE '_transient_timeout_%' AND option_value < UNIX_TIMESTAMP()" --allow-root 2>/dev/null | tail -n +2`;
+      const expiredResult = await this.sshExecutor.executeCommand(serverId, expiredCommand, 15000);
+      const expiredTransients = parseInt(expiredResult.trim()) || 0;
+
+      // Calculate approximate bloat size
+      const bloatCommand = `cd ${sitePath} && wp db query "SELECT SUM(LENGTH(option_value)) FROM wp_options WHERE option_name LIKE '_transient_%'" --allow-root 2>/dev/null | tail -n +2`;
+      const bloatResult = await this.sshExecutor.executeCommand(serverId, bloatCommand, 15000);
+      const bloatBytes = parseInt(bloatResult.trim()) || 0;
+      const bloatSizeMB = bloatBytes / (1024 * 1024);
+
+      const cleanupRecommended = expiredTransients > 10000 || bloatSizeMB > 50;
+
+      return {
+        totalTransients,
+        expiredTransients,
+        bloatSizeMB,
+        cleanupRecommended,
+      };
+    } catch (error) {
+      this.logger.warn(`Orphaned transients detection failed: ${(error as Error).message}`);
+      return {
+        totalTransients: 0,
+        expiredTransients: 0,
+        bloatSizeMB: 0,
+        cleanupRecommended: false,
+      };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 4: Check auto-increment capacity
+   */
+  private async checkAutoIncrementCapacity(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    tablesAtRisk: Array<{
+      table: string;
+      currentValue: number;
+      maxValue: number;
+      percentUsed: number;
+    }>;
+  }> {
+    try {
+      const tablesAtRisk: Array<{
+        table: string;
+        currentValue: number;
+        maxValue: number;
+        percentUsed: number;
+      }> = [];
+
+      // Query information_schema for auto_increment values
+      const command = `cd ${sitePath} && wp db query "SELECT TABLE_NAME, AUTO_INCREMENT, COLUMN_TYPE FROM information_schema.TABLES t JOIN information_schema.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_SCHEMA = DATABASE() AND t.AUTO_INCREMENT IS NOT NULL AND c.EXTRA LIKE '%auto_increment%'" --allow-root 2>/dev/null`;
+      const result = await this.sshExecutor.executeCommand(serverId, command, 20000);
+
+      const lines = result.trim().split('\n').slice(1); // Skip header
+
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length < 3) continue;
+
+        const table = parts[0];
+        const currentValue = parseInt(parts[1]) || 0;
+        const columnType = parts[2];
+
+        // Determine max value based on column type
+        let maxValue = 0;
+        if (columnType.includes('bigint')) {
+          maxValue = columnType.includes('unsigned') ? 18446744073709551615 : 9223372036854775807;
+        } else if (columnType.includes('int')) {
+          maxValue = columnType.includes('unsigned') ? 4294967295 : 2147483647;
+        } else if (columnType.includes('mediumint')) {
+          maxValue = columnType.includes('unsigned') ? 16777215 : 8388607;
+        } else if (columnType.includes('smallint')) {
+          maxValue = columnType.includes('unsigned') ? 65535 : 32767;
+        }
+
+        if (maxValue > 0) {
+          const percentUsed = (currentValue / maxValue) * 100;
+
+          // Flag if >80% capacity
+          if (percentUsed > 80) {
+            tablesAtRisk.push({
+              table,
+              currentValue,
+              maxValue,
+              percentUsed,
+            });
+          }
+        }
+      }
+
+      return { tablesAtRisk };
+    } catch (error) {
+      this.logger.warn(`Auto-increment capacity check failed: ${(error as Error).message}`);
+      return { tablesAtRisk: [] };
+    }
+  }
+
+  /**
+   * PHASE 1 - LAYER 4: Track database growth
+   */
+  private async trackDatabaseGrowth(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    currentSizeMB: number;
+    largestTables: Array<{ table: string; sizeMB: number }>;
+    growthRate: string;
+  }> {
+    try {
+      // Get current database size
+      const sizeCommand = `cd ${sitePath} && wp db query "SELECT SUM(data_length + index_length) / 1024 / 1024 AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()" --allow-root 2>/dev/null | tail -n +2`;
+      const sizeResult = await this.sshExecutor.executeCommand(serverId, sizeCommand, 15000);
+      const currentSizeMB = parseFloat(sizeResult.trim()) || 0;
+
+      // Get largest tables
+      const largestCommand = `cd ${sitePath} && wp db query "SELECT TABLE_NAME, (data_length + index_length) / 1024 / 1024 AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY size_mb DESC LIMIT 10" --allow-root 2>/dev/null | tail -n +2`;
+      const largestResult = await this.sshExecutor.executeCommand(serverId, largestCommand, 15000);
+      
+      const largestTables: Array<{ table: string; sizeMB: number }> = [];
+      const lines = largestResult.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+          largestTables.push({
+            table: parts[0],
+            sizeMB: parseFloat(parts[1]) || 0,
+          });
+        }
+      }
+
+      // Growth rate calculation would require historical data
+      // For now, we'll return a placeholder
+      const growthRate = 'Historical data not available';
+
+      return {
+        currentSizeMB,
+        largestTables,
+        growthRate,
+      };
+    } catch (error) {
+      this.logger.warn(`Database growth tracking failed: ${(error as Error).message}`);
+      return {
+        currentSizeMB: 0,
+        largestTables: [],
+        growthRate: 'Unknown',
+      };
+    }
+  }
+
   getCheckType(): DiagnosisCheckType {
-    return DiagnosisCheckType.DATABASE_CONNECTION;
+    return DiagnosisCheckType.DATABASE_HEALTH;
   }
 
   getPriority(): CheckPriority {
@@ -332,6 +707,6 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
   }
 
   canHandle(checkType: DiagnosisCheckType): boolean {
-    return checkType === DiagnosisCheckType.DATABASE_CONNECTION;
+    return checkType === DiagnosisCheckType.DATABASE_HEALTH;
   }
 }

@@ -60,6 +60,33 @@ export default function DiagnosePage() {
     enabled: !!siteId,
   });
 
+  // Fetch execution details (includes diagnosis)
+  const { data: executionData, isLoading: isLoadingExecution } = useQuery({
+    queryKey: ['healer-execution', executionId],
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/healer/executions/${executionId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch execution');
+      }
+
+      return response.json();
+    },
+    enabled: !!executionId,
+    refetchInterval: (data) => {
+      // Stop polling if execution is complete
+      const status = data?.data?.status;
+      if (status === 'SUCCESS' || status === 'FAILED' || status === 'ROLLED_BACK') {
+        return false;
+      }
+      return 2000; // Poll every 2 seconds
+    },
+  });
+
   // Trigger diagnosis mutation
   const diagnoseMutation = useMutation({
     mutationFn: async () => {
@@ -92,6 +119,44 @@ export default function DiagnosePage() {
     onError: (error: Error) => {
       toast({
         title: 'Diagnosis Failed',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Trigger healing mutation
+  const healMutation = useMutation({
+    mutationFn: async (customCommands?: string[]) => {
+      const response = await fetch(`/api/v1/healer/sites/${siteId}/heal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+        body: JSON.stringify({
+          executionId,
+          customCommands,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to start healing');
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Healing Started',
+        description: 'Healing process has been initiated',
+      });
+      queryClient.invalidateQueries({ queryKey: ['healer-execution', executionId] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Healing Failed',
         description: error.message,
         variant: 'destructive',
       });
@@ -218,8 +283,27 @@ export default function DiagnosePage() {
       </Card>
 
       {/* Diagnosis Result or Progress */}
-      {executionId ? (
-        <HealingProgress executionId={executionId} siteId={siteId} />
+      {executionData?.data ? (
+        <div className="space-y-6">
+          {/* Show Diagnosis Panel */}
+          {executionData.data.diagnosisDetails && (
+            <DiagnosisPanel
+              diagnosis={JSON.parse(executionData.data.diagnosisDetails)}
+              onFix={() => healMutation.mutate()}
+              isHealing={healMutation.isPending || ['HEALING', 'VERIFYING'].includes(executionData.data.status)}
+              siteId={siteId}
+            />
+          )}
+
+          {/* Show Healing Progress if healing started */}
+          {['APPROVED', 'HEALING', 'VERIFYING', 'SUCCESS', 'FAILED', 'ROLLED_BACK'].includes(executionData.data.status) && (
+            <HealingProgress 
+              status={executionData.data.status}
+              startedAt={executionData.data.createdAt}
+              finishedAt={executionData.data.finishedAt}
+            />
+          )}
+        </div>
       ) : diagnoseMutation.isPending ? (
         <Alert>
           <Activity className="h-4 w-4 animate-spin" />

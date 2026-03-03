@@ -20,6 +20,7 @@ import { MaintenanceHealerRunbook } from './runbooks/maintenance-healer.runbook'
 import { PrismaService } from './stubs/prisma.service.stub';
 import { ServersModule } from '../servers/servers.module';
 import { AuditModule } from '../audit/audit.module';
+import { EventsModule } from '../../common/events/events.module';
 // Phase 1: Intelligence Services
 import { VerificationService } from './services/verification.service';
 import { MetricsService } from './services/metrics.service';
@@ -36,6 +37,31 @@ import { BackupStatusService } from './services/checks/backup-status.service';
 import { ResourceMonitoringService } from './services/checks/resource-monitoring.service';
 import { PluginThemeAnalysisService } from './services/checks/plugin-theme-analysis.service';
 import { UptimeMonitoringService } from './services/checks/uptime-monitoring.service';
+// Phase 3: Error Log Analysis
+import { ErrorLogAnalysisService } from './services/checks/error-log-analysis.service';
+// Phase 4: Additional Check Services
+import { HttpStatusService } from './services/checks/http-status.service';
+import { MaintenanceModeService } from './services/checks/maintenance-mode.service';
+import { DatabaseConnectionService } from './services/checks/database-connection.service';
+import { WpVersionService } from './services/checks/wp-version.service';
+import { CoreIntegrityService } from './services/checks/core-integrity.service';
+import { PluginStatusService } from './services/checks/plugin-status.service';
+import { ThemeStatusService } from './services/checks/theme-status.service';
+// Real-Time Progress Tracking
+import { DiagnosisProgressService } from './services/diagnosis-progress.service';
+// Phase 2: Correlation Engine
+import { CorrelationEngineService } from './services/correlation-engine.service';
+// New comprehensive check services
+import { DnsResolutionService } from './services/checks/dns-resolution.service';
+import { SslCertificateValidationService } from './services/checks/ssl-certificate-validation.service';
+import { MixedContentDetectionService } from './services/checks/mixed-content-detection.service';
+import { ResponseTimeBaselineService } from './services/checks/response-time-baseline.service';
+import { ChecksumVerificationService } from './services/checks/checksum-verification.service';
+import { TableCorruptionCheckService } from './services/checks/table-corruption-check.service';
+import { LoginAttemptAnalysisService } from './services/checks/login-attempt-analysis.service';
+import { SecurityKeysValidationService } from './services/checks/security-keys-validation.service';
+import { OrphanedTransientsDetectionService } from './services/checks/orphaned-transients-detection.service';
+import { BackdoorDetectionService } from './services/checks/backdoor-detection.service';
 // Universal Healer: Core Services
 import { ApplicationService } from './services/application.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
@@ -64,6 +90,7 @@ import { ApplicationController } from './controllers/application.controller';
   imports: [
     ServersModule, // Import Module 2 for SSH functionality
     AuditModule, // Import audit module for logging
+    EventsModule, // Import events module for SSE
     ScheduleModule.forRoot(), // For cron jobs in MetricsService
     BullModule.registerQueue({
       name: 'healer-jobs',
@@ -119,6 +146,31 @@ import { ApplicationController } from './controllers/application.controller';
     ResourceMonitoringService,
     PluginThemeAnalysisService,
     UptimeMonitoringService,
+    // Phase 3: Error Log Analysis
+    ErrorLogAnalysisService,
+    // Phase 4: Additional Check Services
+    HttpStatusService,
+    MaintenanceModeService,
+    DatabaseConnectionService,
+    WpVersionService,
+    CoreIntegrityService,
+    PluginStatusService,
+    ThemeStatusService,
+    // Real-Time Progress Tracking
+    DiagnosisProgressService,
+    // Phase 2: Correlation Engine
+    CorrelationEngineService,
+    // New comprehensive check services
+    DnsResolutionService,
+    SslCertificateValidationService,
+    MixedContentDetectionService,
+    ResponseTimeBaselineService,
+    ChecksumVerificationService,
+    TableCorruptionCheckService,
+    LoginAttemptAnalysisService,
+    SecurityKeysValidationService,
+    OrphanedTransientsDetectionService,
+    BackdoorDetectionService,
     // Universal Healer: Core Services
     ApplicationService,
     PluginRegistryService,

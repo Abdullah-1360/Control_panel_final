@@ -6,8 +6,8 @@
 
 'use client';
 
-import { useState } from 'react';
-import { Application, DiagnosticResult } from '@/lib/api/healer';
+import { useState, useEffect } from 'react';
+import { Application, DiagnosticResult, healerApi } from '@/lib/api/healer';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,8 +38,34 @@ export function DiagnosePage({
   const { toast } = useToast();
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<DiagnosticResult[]>(diagnosticResults);
+  const [isLoading, setIsLoading] = useState(true);
   
   const diagnoseMutation = useDiagnoseApplication();
+
+  // Fetch diagnostic results when component mounts or application changes
+  useEffect(() => {
+    const fetchResults = async () => {
+      setIsLoading(true);
+      try {
+        console.log('[DiagnosePage] Fetching diagnostic results for application:', application.id);
+        const response = await healerApi.getDiagnosticResults(application.id);
+        console.log('[DiagnosePage] Diagnostic results response:', response);
+        setResults(response.results || []);
+        console.log('[DiagnosePage] Set results:', response.results?.length || 0, 'checks');
+      } catch (error) {
+        console.error('[DiagnosePage] Failed to fetch diagnostic results:', error);
+        toast({
+          title: 'Failed to Load Results',
+          description: 'Could not fetch diagnostic results',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchResults();
+  }, [application.id, toast]);
 
   const handleRunDiagnosis = async () => {
     setIsRunning(true);

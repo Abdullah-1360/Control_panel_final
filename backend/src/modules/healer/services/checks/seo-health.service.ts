@@ -141,12 +141,20 @@ export class SeoHealthService implements IDiagnosisCheckService {
 
   private async checkMetaTags(domain: string): Promise<any> {
     try {
-      const command = `curl -s https://${domain} --max-time 10 2>/dev/null || curl -s http://${domain} --max-time 10 2>/dev/null`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
+      const axios = require('axios');
+      let html = '';
+      
+      try {
+        const response = await axios.get(`https://${domain}`, { timeout: 10000 });
+        html = response.data;
+      } catch (httpsError) {
+        const response = await axios.get(`http://${domain}`, { timeout: 10000 });
+        html = response.data;
+      }
 
       return {
-        hasTitle: result.includes('<title>') && !result.includes('<title></title>'),
-        hasDescription: result.includes('name="description"') || result.includes('name=\'description\''),
+        hasTitle: html.includes('<title>') && !html.includes('<title></title>'),
+        hasDescription: html.includes('name="description"') || html.includes('name=\'description\''),
       };
     } catch (error) {
       return { hasTitle: false, hasDescription: false };
@@ -155,11 +163,19 @@ export class SeoHealthService implements IDiagnosisCheckService {
 
   private async checkOpenGraphTags(domain: string): Promise<any> {
     try {
-      const command = `curl -s https://${domain} --max-time 10 2>/dev/null || curl -s http://${domain} --max-time 10 2>/dev/null`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
+      const axios = require('axios');
+      let html = '';
+      
+      try {
+        const response = await axios.get(`https://${domain}`, { timeout: 10000 });
+        html = response.data;
+      } catch (httpsError) {
+        const response = await axios.get(`http://${domain}`, { timeout: 10000 });
+        html = response.data;
+      }
 
       return {
-        hasOgTags: result.includes('property="og:') || result.includes('property=\'og:'),
+        hasOgTags: html.includes('property="og:') || html.includes('property=\'og:'),
       };
     } catch (error) {
       return { hasOgTags: false };
@@ -168,11 +184,19 @@ export class SeoHealthService implements IDiagnosisCheckService {
 
   private async checkCanonicalUrl(domain: string): Promise<any> {
     try {
-      const command = `curl -s https://${domain} --max-time 10 2>/dev/null || curl -s http://${domain} --max-time 10 2>/dev/null`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
+      const axios = require('axios');
+      let html = '';
+      
+      try {
+        const response = await axios.get(`https://${domain}`, { timeout: 10000 });
+        html = response.data;
+      } catch (httpsError) {
+        const response = await axios.get(`http://${domain}`, { timeout: 10000 });
+        html = response.data;
+      }
 
       return {
-        hasCanonical: result.includes('rel="canonical"') || result.includes('rel=\'canonical\''),
+        hasCanonical: html.includes('rel="canonical"') || html.includes('rel=\'canonical\''),
       };
     } catch (error) {
       return { hasCanonical: false };
@@ -181,11 +205,18 @@ export class SeoHealthService implements IDiagnosisCheckService {
 
   private async checkMixedContent(domain: string): Promise<any> {
     try {
-      const command = `curl -s https://${domain} --max-time 10 2>/dev/null | grep -i 'src="http://' || echo "NONE"`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
+      const axios = require('axios');
+      let html = '';
+      
+      try {
+        const response = await axios.get(`https://${domain}`, { timeout: 10000 });
+        html = response.data;
+      } catch (httpsError) {
+        return { hasMixedContent: false }; // If HTTPS fails, no mixed content issue
+      }
 
       return {
-        hasMixedContent: result.trim() !== 'NONE',
+        hasMixedContent: html.includes('src="http://') || html.includes('src=\'http://'),
       };
     } catch (error) {
       return { hasMixedContent: false };

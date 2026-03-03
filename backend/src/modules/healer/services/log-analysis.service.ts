@@ -459,4 +459,363 @@ export class LogAnalysisService {
       return false;
     }
   }
+
+  /**
+   * PHASE 3 - LAYER 7: Categorize errors by severity
+   */
+  categorizeErrors(errors: ParsedError[]): {
+    fatal: ParsedError[];
+    warning: ParsedError[];
+    notice: ParsedError[];
+    deprecated: ParsedError[];
+  } {
+    const categorized = {
+      fatal: [] as ParsedError[],
+      warning: [] as ParsedError[],
+      notice: [] as ParsedError[],
+      deprecated: [] as ParsedError[],
+    };
+
+    for (const error of errors) {
+      const level = error.level.toLowerCase();
+      const message = error.message.toLowerCase();
+
+      if (level.includes('fatal') || message.includes('fatal error')) {
+        categorized.fatal.push(error);
+      } else if (level.includes('warning') || message.includes('warning')) {
+        categorized.warning.push(error);
+      } else if (level.includes('deprecated') || message.includes('deprecated')) {
+        categorized.deprecated.push(error);
+      } else if (level.includes('notice') || message.includes('notice')) {
+        categorized.notice.push(error);
+      } else {
+        // Default to warning for unknown types
+        categorized.warning.push(error);
+      }
+    }
+
+    return categorized;
+  }
+
+  /**
+   * PHASE 3 - LAYER 7: Analyze error frequency and detect spikes
+   */
+  analyzeErrorFrequency(errors: ParsedError[]): {
+    totalErrors: number;
+    errorsPerHour: number;
+    hasSpike: boolean;
+    spikeThreshold: number;
+    recentErrors: number;
+    oldErrors: number;
+    frequencyAnalysis: string;
+  } {
+    if (errors.length === 0) {
+      return {
+        totalErrors: 0,
+        errorsPerHour: 0,
+        hasSpike: false,
+        spikeThreshold: 0,
+        recentErrors: 0,
+        oldErrors: 0,
+        frequencyAnalysis: 'No errors detected',
+      };
+    }
+
+    // Parse timestamps and calculate time range
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    let recentErrors = 0; // Last hour
+    let oldErrors = 0; // 1-24 hours ago
+
+    for (const error of errors) {
+      try {
+        const errorDate = new Date(error.timestamp);
+
+        if (errorDate >= oneHourAgo) {
+          recentErrors++;
+        } else if (errorDate >= twentyFourHoursAgo) {
+          oldErrors++;
+        }
+      } catch {
+        // If timestamp parsing fails, count as old error
+        oldErrors++;
+      }
+    }
+
+    // Calculate errors per hour (based on last 24 hours)
+    const errorsPerHour = Math.round(errors.length / 24);
+
+    // Detect spike: Recent errors (last hour) > 3x average hourly rate
+    const spikeThreshold = errorsPerHour * 3;
+    const hasSpike = recentErrors > spikeThreshold && recentErrors > 10;
+
+    let frequencyAnalysis = '';
+    if (hasSpike) {
+      frequencyAnalysis = `ERROR SPIKE DETECTED: ${recentErrors} errors in last hour (normal: ${errorsPerHour}/hour)`;
+    } else if (errorsPerHour > 50) {
+      frequencyAnalysis = `High error rate: ${errorsPerHour} errors/hour`;
+    } else if (errorsPerHour > 10) {
+      frequencyAnalysis = `Moderate error rate: ${errorsPerHour} errors/hour`;
+    } else {
+      frequencyAnalysis = `Low error rate: ${errorsPerHour} errors/hour`;
+    }
+
+    return {
+      totalErrors: errors.length,
+      errorsPerHour,
+      hasSpike,
+      spikeThreshold,
+      recentErrors,
+      oldErrors,
+      frequencyAnalysis,
+    };
+  }
+
+  /**
+   * PHASE 3 - LAYER 7: Detect 404 error patterns (probing attacks)
+   */
+  async detect404Patterns(
+    serverId: string,
+    sitePath: string,
+    domain?: string,
+  ): Promise<{
+    total404s: number;
+    suspiciousPatterns: string[];
+    probingAttack: boolean;
+    attackVectors: string[];
+    recommendations: string[];
+  }> {
+    try {
+      // Check access logs for 404 errors
+      const accessLogPaths = [
+        '/var/log/nginx/access.log',
+        '/var/log/apache2/access.log',
+        '/var/log/httpd/access_log',
+      ];
+
+      let logContent = '';
+      for (const logPath of accessLogPaths) {
+        try {
+          const exists = await this.checkFileExists(serverId, logPath);
+          if (!exists) continue;
+
+          const filterPattern = domain || sitePath;
+          const command = `tail -n 500 ${logPath} | grep "${filterPattern}" | grep " 404 "`;
+          const result = await this.sshService.executeCommand(serverId, command, 30000);
+
+          if (result && result.trim()) {
+            logContent = result;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!logContent) {
+        return {
+          total404s: 0,
+          suspiciousPatterns: [],
+          probingAttack: false,
+          attackVectors: [],
+          recommendations: [],
+        };
+      }
+
+      const lines = logContent.split('\n').filter(l => l.trim());
+      const total404s = lines.length;
+
+      // Detect suspicious patterns
+      const suspiciousPatterns: string[] = [];
+      const attackVectors: string[] = [];
+
+      // Common attack patterns
+      const attackPatternChecks = [
+        { pattern: /wp-admin|wp-login|xmlrpc\.php/i, vector: 'WordPress admin/login probing' },
+        { pattern: /\.env|\.git|\.svn|\.htaccess/i, vector: 'Configuration file probing' },
+        { pattern: /phpmyadmin|adminer|sql/i, vector: 'Database admin tool probing' },
+        { pattern: /\.php\?|\.asp\?|\.jsp\?/i, vector: 'Script injection attempts' },
+        { pattern: /eval\(|base64|exec\(/i, vector: 'Code execution attempts' },
+        { pattern: /\.\.|\/etc\/passwd|\/proc\//i, vector: 'Directory traversal attempts' },
+        { pattern: /wp-content\/uploads\/.*\.php/i, vector: 'Malicious file upload attempts' },
+      ];
+
+      for (const line of lines) {
+        for (const check of attackPatternChecks) {
+          if (check.pattern.test(line)) {
+            if (!suspiciousPatterns.includes(line.substring(0, 100))) {
+              suspiciousPatterns.push(line.substring(0, 100));
+            }
+            if (!attackVectors.includes(check.vector)) {
+              attackVectors.push(check.vector);
+            }
+          }
+        }
+      }
+
+      // Determine if it's a probing attack
+      // Criteria: >50 404s with >3 different attack vectors
+      const probingAttack = total404s > 50 && attackVectors.length >= 3;
+
+      const recommendations: string[] = [];
+      if (probingAttack) {
+        recommendations.push('CRITICAL: Active probing attack detected - review firewall rules');
+        recommendations.push('Block suspicious IP addresses');
+        recommendations.push('Enable rate limiting');
+        recommendations.push('Consider using a WAF (Web Application Firewall)');
+      } else if (attackVectors.length > 0) {
+        recommendations.push('Suspicious 404 patterns detected - monitor closely');
+        recommendations.push('Review access logs for repeated offenders');
+      }
+
+      return {
+        total404s,
+        suspiciousPatterns: suspiciousPatterns.slice(0, 10), // Top 10
+        probingAttack,
+        attackVectors,
+        recommendations,
+      };
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(`Failed to detect 404 patterns: ${err.message}`);
+      return {
+        total404s: 0,
+        suspiciousPatterns: [],
+        probingAttack: false,
+        attackVectors: [],
+        recommendations: [],
+      };
+    }
+  }
+
+  /**
+   * PHASE 3 - LAYER 7: Correlate errors by plugin/theme
+   */
+  correlateErrorsBySource(errors: ParsedError[]): {
+    byPlugin: Map<string, number>;
+    byTheme: Map<string, number>;
+    byType: Map<string, number>;
+    topCulprits: Array<{ name: string; count: number; type: string }>;
+  } {
+    const byPlugin = new Map<string, number>();
+    const byTheme = new Map<string, number>();
+    const byType = new Map<string, number>();
+
+    for (const error of errors) {
+      // Count by type
+      if (error.type) {
+        byType.set(error.type, (byType.get(error.type) || 0) + 1);
+      }
+
+      // Count by culprit
+      if (error.culprit) {
+        if (error.type === 'PLUGIN_FAULT') {
+          byPlugin.set(error.culprit, (byPlugin.get(error.culprit) || 0) + 1);
+        } else if (error.type === 'THEME_FAULT') {
+          byTheme.set(error.culprit, (byTheme.get(error.culprit) || 0) + 1);
+        }
+      }
+    }
+
+    // Build top culprits list
+    const topCulprits: Array<{ name: string; count: number; type: string }> = [];
+
+    for (const [name, count] of byPlugin.entries()) {
+      topCulprits.push({ name, count, type: 'plugin' });
+    }
+
+    for (const [name, count] of byTheme.entries()) {
+      topCulprits.push({ name, count, type: 'theme' });
+    }
+
+    // Sort by count descending
+    topCulprits.sort((a, b) => b.count - a.count);
+
+    return {
+      byPlugin,
+      byTheme,
+      byType,
+      topCulprits: topCulprits.slice(0, 10), // Top 10
+    };
+  }
+
+  /**
+   * PHASE 3 - LAYER 7: Generate comprehensive log analysis report
+   */
+  async generateComprehensiveReport(
+    serverId: string,
+    sitePath: string,
+    domain?: string,
+  ): Promise<{
+    summary: string;
+    categorization: any;
+    frequency: any;
+    patterns404: any;
+    correlation: any;
+    recommendations: string[];
+    severity: 'low' | 'medium' | 'high' | 'critical';
+  }> {
+    // Analyze all logs
+    const logResults = await this.analyzeLogs(serverId, sitePath, domain);
+
+    // Aggregate all errors
+    const allErrors: ParsedError[] = [];
+    for (const result of logResults) {
+      allErrors.push(...result.errors);
+    }
+
+    // Run all Phase 3 analyses
+    const categorization = this.categorizeErrors(allErrors);
+    const frequency = this.analyzeErrorFrequency(allErrors);
+    const patterns404 = await this.detect404Patterns(serverId, sitePath, domain);
+    const correlation = this.correlateErrorsBySource(allErrors);
+
+    // Determine severity
+    let severity: 'low' | 'medium' | 'high' | 'critical' = 'low';
+    if (categorization.fatal.length > 10 || frequency.hasSpike || patterns404.probingAttack) {
+      severity = 'critical';
+    } else if (categorization.fatal.length > 0 || frequency.errorsPerHour > 50) {
+      severity = 'high';
+    } else if (categorization.warning.length > 20 || frequency.errorsPerHour > 10) {
+      severity = 'medium';
+    }
+
+    // Generate recommendations
+    const recommendations: string[] = [];
+
+    if (categorization.fatal.length > 0) {
+      recommendations.push(`Fix ${categorization.fatal.length} fatal error(s) immediately`);
+    }
+
+    if (frequency.hasSpike) {
+      recommendations.push(frequency.frequencyAnalysis);
+    }
+
+    if (correlation.topCulprits.length > 0) {
+      const top = correlation.topCulprits[0];
+      recommendations.push(`Top error source: ${top.name} (${top.type}) with ${top.count} errors`);
+    }
+
+    if (patterns404.probingAttack) {
+      recommendations.push(...patterns404.recommendations);
+    }
+
+    // Generate summary
+    const summary = `Analyzed ${logResults.length} log file(s), found ${allErrors.length} total errors. ` +
+      `Fatal: ${categorization.fatal.length}, Warnings: ${categorization.warning.length}. ` +
+      `Severity: ${severity.toUpperCase()}`;
+
+    return {
+      summary,
+      categorization,
+      frequency,
+      patterns404,
+      correlation,
+      recommendations,
+      severity,
+    };
+  }
+
 }

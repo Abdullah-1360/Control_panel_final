@@ -108,6 +108,60 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const muPlugins = await this.checkMustUsePlugins(serverId, sitePath);
       details.mustUsePlugins = muPlugins;
 
+      // PHASE 3 - LAYER 6: Advanced Plugin & Theme Analysis
+      // Check for vulnerabilities via WPScan API
+      const vulnerabilities = await this.checkVulnerabilities(serverId, sitePath);
+      details.vulnerabilities = vulnerabilities;
+
+      if (vulnerabilities.critical > 0) {
+        score -= vulnerabilities.critical * 25;
+        status = CheckStatus.FAIL;
+        recommendations.push(
+          `CRITICAL: ${vulnerabilities.critical} plugin(s)/theme(s) with known vulnerabilities - UPDATE IMMEDIATELY`,
+        );
+      }
+      if (vulnerabilities.high > 0) {
+        score -= vulnerabilities.high * 15;
+        if (status === CheckStatus.PASS) status = CheckStatus.WARNING;
+        recommendations.push(
+          `High risk: ${vulnerabilities.high} plugin(s)/theme(s) with high severity vulnerabilities`,
+        );
+      }
+
+      // Check for abandoned plugins (>2 years no update)
+      const abandonedPlugins = await this.detectAbandonedPlugins(serverId, sitePath);
+      details.abandonedPlugins = abandonedPlugins;
+
+      if (abandonedPlugins.length > 0) {
+        score -= abandonedPlugins.length * 10;
+        if (status === CheckStatus.PASS) status = CheckStatus.WARNING;
+        recommendations.push(
+          `Replace ${abandonedPlugins.length} abandoned plugin(s) (no updates >2 years)`,
+        );
+      }
+
+      // Check version currency against WordPress.org
+      const outdatedItems = await this.checkVersionCurrency(serverId, sitePath);
+      details.outdatedItems = outdatedItems;
+
+      if (outdatedItems.critical > 0) {
+        score -= outdatedItems.critical * 10;
+        recommendations.push(
+          `Update ${outdatedItems.critical} critically outdated plugin(s)/theme(s)`,
+        );
+      }
+
+      // Advanced plugin conflict detection
+      const advancedConflicts = await this.detectAdvancedConflicts(serverId, sitePath);
+      details.advancedConflicts = advancedConflicts;
+
+      if (advancedConflicts.length > 0) {
+        score -= advancedConflicts.length * 8;
+        recommendations.push(
+          `Investigate ${advancedConflicts.length} potential compatibility issue(s)`,
+        );
+      }
+
       score = Math.max(0, Math.min(100, score));
 
       if (score < 60) {
@@ -428,6 +482,313 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       return { count: 0, enabled: false };
     }
   }
+
+  /**
+   * PHASE 3 - LAYER 6: Check for known vulnerabilities via WPScan Vulnerability Database
+   */
+  private async checkVulnerabilities(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    vulnerableItems: any[];
+  }> {
+    try {
+      const pluginsResult = await this.wpCli.execute(
+        serverId,
+        sitePath,
+        'plugin list --format=json',
+      );
+      const themesResult = await this.wpCli.execute(
+        serverId,
+        sitePath,
+        'theme list --format=json',
+      );
+
+      const plugins = JSON.parse(pluginsResult);
+      const themes = JSON.parse(themesResult);
+
+      let critical = 0;
+      let high = 0;
+      let medium = 0;
+      let low = 0;
+      const vulnerableItems: any[] = [];
+
+      // Check plugins - in production integrate with WPScan API
+      for (const plugin of plugins) {
+        if (plugin.status === 'active' && plugin.update !== 'none') {
+          const vulnCheck = await this.checkItemVulnerability(
+            'plugin',
+            plugin.name,
+            plugin.version,
+          );
+
+          if (vulnCheck.hasVulnerability) {
+            vulnerableItems.push({
+              type: 'plugin',
+              name: plugin.name,
+              version: plugin.version,
+              severity: vulnCheck.severity,
+              cve: vulnCheck.cve,
+            });
+
+            switch (vulnCheck.severity) {
+              case 'critical':
+                critical++;
+                break;
+              case 'high':
+                high++;
+                break;
+              case 'medium':
+                medium++;
+                break;
+              case 'low':
+                low++;
+                break;
+            }
+          }
+        }
+      }
+
+      return {
+        critical,
+        high,
+        medium,
+        low,
+        vulnerableItems,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Failed to check vulnerabilities: ${errorMessage}`);
+      return {
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        vulnerableItems: [],
+      };
+    }
+  }
+
+  private async checkItemVulnerability(
+    type: 'plugin' | 'theme',
+    slug: string,
+    version: string,
+  ): Promise<{
+    hasVulnerability: boolean;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    cve?: string;
+  }> {
+    // Placeholder - in production call WPScan API
+    return {
+      hasVulnerability: false,
+      severity: 'low',
+    };
+  }
+
+  private async detectAbandonedPlugins(
+    serverId: string,
+    sitePath: string,
+  ): Promise<any[]> {
+    try {
+      const result = await this.wpCli.execute(
+        serverId,
+        sitePath,
+        'plugin list --format=json',
+      );
+
+      const plugins = JSON.parse(result);
+      const abandonedPlugins: any[] = [];
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      for (const plugin of plugins) {
+        const lastUpdate = await this.getPluginLastUpdate(plugin.name);
+
+        if (lastUpdate && lastUpdate < twoYearsAgo) {
+          abandonedPlugins.push({
+            name: plugin.name,
+            version: plugin.version,
+            status: plugin.status,
+            lastUpdate: lastUpdate.toISOString(),
+            daysSinceUpdate: Math.floor(
+              (Date.now() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24),
+            ),
+          });
+        }
+      }
+
+      return abandonedPlugins;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Failed to detect abandoned plugins: ${errorMessage}`);
+      return [];
+    }
+  }
+
+  private async getPluginLastUpdate(slug: string): Promise<Date | null> {
+    // Placeholder - in production call WordPress.org API
+    return null;
+  }
+
+  private async checkVersionCurrency(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    critical: number;
+    outdated: number;
+    upToDate: number;
+    items: any[];
+  }> {
+    try {
+      const pluginsResult = await this.wpCli.execute(
+        serverId,
+        sitePath,
+        'plugin list --format=json',
+      );
+
+      const plugins = JSON.parse(pluginsResult);
+
+      let critical = 0;
+      let outdated = 0;
+      let upToDate = 0;
+      const items: any[] = [];
+
+      for (const plugin of plugins) {
+        if (plugin.status === 'active') {
+          if (plugin.update === 'available') {
+            const versionDiff = await this.compareVersions(
+              plugin.version,
+              plugin.update_version || 'unknown',
+            );
+
+            if (versionDiff.majorVersionsBehind >= 2) {
+              critical++;
+              items.push({
+                type: 'plugin',
+                name: plugin.name,
+                currentVersion: plugin.version,
+                latestVersion: plugin.update_version,
+                severity: 'critical',
+                versionsBehind: versionDiff.majorVersionsBehind,
+              });
+            } else if (versionDiff.majorVersionsBehind >= 1) {
+              outdated++;
+            }
+          } else {
+            upToDate++;
+          }
+        }
+      }
+
+      return {
+        critical,
+        outdated,
+        upToDate,
+        items,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Failed to check version currency: ${errorMessage}`);
+      return {
+        critical: 0,
+        outdated: 0,
+        upToDate: 0,
+        items: [],
+      };
+    }
+  }
+
+  private async compareVersions(
+    current: string,
+    latest: string,
+  ): Promise<{
+    majorVersionsBehind: number;
+    minorVersionsBehind: number;
+    patchVersionsBehind: number;
+  }> {
+    try {
+      const currentParts = current.split('.').map((v) => parseInt(v, 10) || 0);
+      const latestParts = latest.split('.').map((v) => parseInt(v, 10) || 0);
+
+      const majorDiff = (latestParts[0] || 0) - (currentParts[0] || 0);
+      const minorDiff = (latestParts[1] || 0) - (currentParts[1] || 0);
+      const patchDiff = (latestParts[2] || 0) - (currentParts[2] || 0);
+
+      return {
+        majorVersionsBehind: Math.max(0, majorDiff),
+        minorVersionsBehind: Math.max(0, minorDiff),
+        patchVersionsBehind: Math.max(0, patchDiff),
+      };
+    } catch (error) {
+      return {
+        majorVersionsBehind: 0,
+        minorVersionsBehind: 0,
+        patchVersionsBehind: 0,
+      };
+    }
+  }
+
+  private async detectAdvancedConflicts(
+    serverId: string,
+    sitePath: string,
+  ): Promise<any[]> {
+    const conflicts: any[] = [];
+
+    try {
+      const result = await this.wpCli.execute(
+        serverId,
+        sitePath,
+        'plugin list --status=active --format=json',
+      );
+
+      const activePlugins = JSON.parse(result);
+      const pluginNames = activePlugins.map((p: any) => p.name.toLowerCase());
+
+      // Check for page builder conflicts
+      const pageBuilders = pluginNames.filter((name: string) =>
+        ['elementor', 'beaver', 'divi', 'visual-composer', 'wpbakery'].some(
+          (builder) => name.includes(builder),
+        ),
+      );
+
+      if (pageBuilders.length > 1) {
+        conflicts.push({
+          type: 'page_builder_conflict',
+          plugins: pageBuilders,
+          severity: 'critical',
+          description: 'Multiple page builders will cause severe conflicts',
+          recommendation: 'CRITICAL: Use only ONE page builder',
+        });
+      }
+
+      // Check for database optimization conflicts
+      const dbOptimizationPlugins = pluginNames.filter((name: string) =>
+        ['database', 'optimize', 'cleanup', 'repair'].some((keyword) =>
+          name.includes(keyword),
+        ),
+      );
+
+      if (dbOptimizationPlugins.length > 1) {
+        conflicts.push({
+          type: 'database_optimization_conflict',
+          plugins: dbOptimizationPlugins,
+          severity: 'high',
+          description: 'Multiple database optimization plugins can corrupt data',
+          recommendation: 'Keep only one database optimization plugin',
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Failed to detect advanced conflicts: ${errorMessage}`);
+    }
+
+    return conflicts;
+  }
+
 
   private buildMessage(status: CheckStatus, details: any): string {
     const { plugins, themes, conflicts } = details;

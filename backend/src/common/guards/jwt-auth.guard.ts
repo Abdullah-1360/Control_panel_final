@@ -49,7 +49,19 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     const token = this.extractTokenFromHeader(request);
 
+    // Log SSE connection attempts
+    if (request.url?.includes('/events/stream')) {
+      this.logger.log(`SSE connection attempt from ${request.ip}`);
+      this.logger.log(`SSE token present: ${!!token}`);
+      if (token) {
+        this.logger.log(`SSE token length: ${token.length}`);
+      }
+    }
+
     if (!token) {
+      if (request.url?.includes('/events/stream')) {
+        this.logger.error('SSE connection failed: No token provided');
+      }
       throw new UnauthorizedException('Access token is required');
     }
 
@@ -62,9 +74,17 @@ export class JwtAuthGuard implements CanActivate {
       // Attach user to request
       request.user = payload as JwtPayload;
 
+      if (request.url?.includes('/events/stream')) {
+        this.logger.log(`SSE authentication successful for user: ${(payload as any).sub}`);
+      }
+
       return true;
     } catch (error: any) {
       this.logger.warn(`JWT verification failed: ${error?.message || 'Unknown error'}`);
+      
+      if (request.url?.includes('/events/stream')) {
+        this.logger.error(`SSE authentication failed: ${error?.message || 'Unknown error'}`);
+      }
       
       if (error?.code === 'ERR_JWT_EXPIRED') {
         throw new UnauthorizedException('Access token has expired');
@@ -75,6 +95,13 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   private extractTokenFromHeader(request: Request): string | undefined {
+    // First, try to get token from query parameter (for SSE endpoints)
+    const queryToken = request.query?.token as string | undefined;
+    if (queryToken) {
+      return queryToken;
+    }
+
+    // Fall back to Authorization header
     const authHeader = request.headers.authorization;
     if (!authHeader) {
       return undefined;

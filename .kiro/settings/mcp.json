@@ -53,8 +53,8 @@
     "devtools": {
       "command": "npx",
       "args": [
-        "-y","--headless","--isolated",
-        "chrome-devtools-mcp@latest"
+       "-y","chrome-devtools-mcp@latest",
+        "--headless","--isolated"
       ],
       "autoApprove": [
         "execute_command",

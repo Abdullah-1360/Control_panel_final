@@ -134,7 +134,11 @@ export function ApplicationCard({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => onViewDetails?.(application.id)}
+            onClick={() => {
+              console.log('[ApplicationCard] View Details clicked for:', application.id);
+              console.log('[ApplicationCard] onViewDetails function:', typeof onViewDetails);
+              onViewDetails?.(application.id);
+            }}
             className="flex-1"
           >
             <Eye className="h-4 w-4 mr-2" />

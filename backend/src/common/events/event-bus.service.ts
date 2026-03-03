@@ -22,6 +22,12 @@ export enum SystemEvent {
   AUTOMATION_FAILED = 'automation.failed',
   AUTOMATION_STEP_COMPLETED = 'automation.step.completed',
 
+  // Diagnosis events
+  DIAGNOSIS_PROGRESS = 'diagnosis.progress',
+  DIAGNOSIS_STARTED = 'diagnosis.started',
+  DIAGNOSIS_COMPLETED = 'diagnosis.completed',
+  DIAGNOSIS_FAILED = 'diagnosis.failed',
+
   // Log events
   LOG_ADDED = 'log.added',
 

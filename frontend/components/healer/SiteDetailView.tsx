@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DiagnosisPanelExtensive } from './DiagnosisPanelExtensive';
 import { HealingProgress } from './HealingProgress';
 import { ExecutionLogs } from './ExecutionLogs';
-import { toast } from 'sonner';
+import { SkeletonCard, SkeletonStats } from '@/components/ui/skeleton';
+import { HealthScoreRing } from '@/components/ui/progress-ring';
+import { StatusCard } from '@/components/ui/status-card';
 
 interface SiteDetailViewProps {
   siteId: string;
@@ -232,116 +234,257 @@ export function SiteDetailView({ siteId, onBack }: SiteDetailViewProps) {
   const getHealthStatusColor = (status: string) => {
     switch (status) {
       case 'HEALTHY':
-        return 'bg-green-500';
+        return 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700';
       case 'DOWN':
-        return 'bg-red-500';
+        return 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700';
       case 'DEGRADED':
-        return 'bg-yellow-500';
+        return 'bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700';
       case 'MAINTENANCE':
-        return 'bg-blue-500';
+        return 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700';
       case 'HEALING':
-        return 'bg-purple-500';
+        return 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 animate-pulse';
       default:
-        return 'bg-gray-500';
+        return 'bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700';
+    }
+  };
+
+  const getHealthStatusIcon = (status: string) => {
+    switch (status) {
+      case 'HEALTHY':
+        return '✅';
+      case 'DOWN':
+        return '🔴';
+      case 'DEGRADED':
+        return '⚠️';
+      case 'MAINTENANCE':
+        return '🔧';
+      case 'HEALING':
+        return '🔄';
+      default:
+        return '❓';
     }
   };
 
   const subdomains = subdomainsData?.data || [];
   const currentDomain = selectedSubdomain === '__main__' ? site?.domain : selectedSubdomain;
 
-  // Show loading state only on initial load, not during tab switches
+  // Show enhanced loading state with skeleton
   if (isSiteLoading && !site) {
     return (
-      <div className="p-6">
-        <div className="flex items-center gap-4 mb-6">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="text-muted-foreground">Loading site details...</div>
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/10">
+        <div className="container mx-auto px-6 py-8 space-y-8">
+          {/* Header Skeleton */}
+          <div className="bg-card/60 backdrop-blur-sm border rounded-xl p-6 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-6">
+                <Button variant="ghost" size="sm" onClick={onBack}>
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Sites
+                </Button>
+                <SkeletonCard />
+              </div>
+              <SkeletonStats />
+            </div>
+          </div>
+          
+          {/* Content Skeleton */}
+          <div className="space-y-6">
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
         </div>
       </div>
     );
   }
 
-  // If site data is not available after loading, show error
+  // Enhanced error state
   if (!site) {
     return (
-      <div className="p-6">
-        <div className="flex items-center gap-4 mb-6">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="text-destructive">Failed to load site details</div>
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/10">
+        <div className="container mx-auto px-6 py-8">
+          <div className="bg-card/60 backdrop-blur-sm border rounded-xl p-6 shadow-lg">
+            <div className="flex items-center gap-4 mb-6">
+              <Button variant="ghost" size="sm" onClick={onBack}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Sites
+              </Button>
+            </div>
+            <div className="text-center py-12">
+              <div className="text-6xl mb-4">🚫</div>
+              <h2 className="text-2xl font-bold mb-2">Site Not Found</h2>
+              <p className="text-muted-foreground mb-6">
+                The requested site could not be loaded. It may have been removed or you may not have access.
+              </p>
+              <Button onClick={onBack} variant="default">
+                Return to Sites List
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold tracking-tight">{site?.domain}</h1>
-          <p className="text-muted-foreground">{site?.path}</p>
-        </div>
-        <Badge className={getHealthStatusColor(site?.healthStatus)}>
-          {site?.healthStatus}
-        </Badge>
-      </div>
-
-      {/* Site Info Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Site Information</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <p className="text-sm text-muted-foreground">Server</p>
-            <p className="font-medium">{site?.server?.host}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">WordPress Version</p>
-            <p className="font-medium">{site?.wpVersion || 'Unknown'}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">PHP Version</p>
-            <p className="font-medium">{site?.phpVersion || 'Unknown'}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Healing Mode</p>
-            <p className="font-medium">{site?.healingMode}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Healing Attempts</p>
-            <p className="font-medium">{site?.healingAttempts || 0} / {site?.maxHealingAttempts || 5}</p>
-          </div>
-          <div className="col-span-2 md:col-span-3 flex items-center gap-2">
-            {site?.healingAttempts >= site?.maxHealingAttempts && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => resetCircuitBreakerMutation.mutate()}
-                disabled={resetCircuitBreakerMutation.isPending}
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/10">
+      <div className="container mx-auto px-6 py-8 space-y-8">
+        {/* Enhanced Header with Better Visual Hierarchy */}
+        <div className="bg-card/60 backdrop-blur-sm border rounded-xl p-6 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-6">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={onBack}
+                className="hover:bg-primary/10 transition-all duration-200 hover:scale-105"
               >
-                {resetCircuitBreakerMutation.isPending ? 'Resetting...' : 'Reset Circuit Breaker'}
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Sites
               </Button>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <Globe className="h-6 w-6 text-primary" />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+                      {site?.domain}
+                    </h1>
+                    <p className="text-sm text-muted-foreground font-medium">{site?.path}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="text-right">
+                  <div className="text-sm text-muted-foreground">Health Status</div>
+                  <Badge 
+                    className={`${getHealthStatusColor(site?.healthStatus)} text-white font-semibold px-3 py-1 shadow-sm`}
+                  >
+                    {site?.healthStatus}
+                  </Badge>
+                </div>
+                {site?.healthScore && (
+                  <HealthScoreRing score={site.healthScore} size={100} />
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Enhanced Site Metadata */}
+          {site && (
+            <div className="mt-6 pt-6 border-t border-border/50">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="flex items-center space-x-2 text-sm">
+                  <Server className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Platform:</span>
+                  <span className="font-medium">{site.platformType}</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Status:</span>
+                  <span className="font-medium">{site.status}</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <History className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Last Check:</span>
+                  <span className="font-medium">
+                    {site.lastChecked ? new Date(site.lastChecked).toLocaleString() : 'Never'}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Domain:</span>
+                  <span className="font-medium">{currentDomain}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Enhanced Site Information Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatusCard
+            title="Server Host"
+            value={site?.server?.host || 'Unknown'}
+            status="info"
+            icon={<Server className="h-4 w-4" />}
+            description="Primary server location"
+          />
+          <StatusCard
+            title="WordPress Version"
+            value={site?.wpVersion || 'Unknown'}
+            status={site?.wpVersion ? 'success' : 'warning'}
+            icon={<Globe className="h-4 w-4" />}
+            description="Current WP installation"
+          />
+          <StatusCard
+            title="PHP Version"
+            value={site?.phpVersion || 'Unknown'}
+            status={site?.phpVersion ? 'success' : 'warning'}
+            icon={<Terminal className="h-4 w-4" />}
+            description="Server PHP version"
+          />
+          <StatusCard
+            title="Healing Mode"
+            value={site?.healingMode || 'AUTO'}
+            status="neutral"
+            icon={<Wrench className="h-4 w-4" />}
+            description="Current healing strategy"
+          />
+        </div>
+
+        {/* Healing Attempts Status */}
+        {site && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <StatusCard
+              title="Healing Attempts"
+              value={`${site?.healingAttempts || 0} / ${site?.maxHealingAttempts || 5}`}
+              status={
+                (site?.healingAttempts || 0) >= (site?.maxHealingAttempts || 5) ? 'error' :
+                (site?.healingAttempts || 0) > 0 ? 'warning' : 'success'
+              }
+              icon={<Activity className="h-4 w-4" />}
+              description="Circuit breaker status"
+            />
+            {site?.healingAttempts >= site?.maxHealingAttempts && (
+              <div className="flex items-center justify-center">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => resetCircuitBreakerMutation.mutate()}
+                  disabled={resetCircuitBreakerMutation.isPending}
+                  className="bg-gradient-to-r from-red-500/10 to-red-600/10 border-red-500/20 hover:from-red-500/20 hover:to-red-600/20"
+                >
+                  {resetCircuitBreakerMutation.isPending ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500 mr-2"></div>
+                      Resetting Circuit Breaker...
+                    </>
+                  ) : (
+                    <>
+                      <Wrench className="mr-2 h-4 w-4" />
+                      Reset Circuit Breaker
+                    </>
+                  )}
+                </Button>
+              </div>
             )}
           </div>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* Subdomain Selection - Always show */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5" />
-              Select Domain/Subdomain
-            </CardTitle>
+        {/* Enhanced Subdomain Selection */}
+        <div className="bg-card/60 backdrop-blur-sm border rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Globe className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Domain Selection</h3>
+                <p className="text-sm text-muted-foreground">Choose which domain to diagnose</p>
+              </div>
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -350,141 +493,204 @@ export function SiteDetailView({ siteId, onBack }: SiteDetailViewProps) {
                 toast.success('Refreshing domains...');
               }}
               disabled={isLoadingSubdomains}
+              className="hover:bg-primary/10 transition-colors"
             >
               <Activity className="mr-2 h-4 w-4" />
-              {isLoadingSubdomains ? 'Detecting...' : 'Refresh'}
+              {isLoadingSubdomains ? 'Detecting...' : 'Refresh Domains'}
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-2">
+          
           {isLoadingSubdomains ? (
-            <div className="text-sm text-muted-foreground">Detecting domains...</div>
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <span className="ml-3 text-muted-foreground">Detecting domains...</span>
+            </div>
           ) : (
-            <>
+            <div className="space-y-4">
               <Select value={selectedSubdomain} onValueChange={setSelectedSubdomain}>
-                <SelectTrigger>
+                <SelectTrigger className="h-12">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__main__">
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4" />
-                      <span>Main Domain: {site?.domain}</span>
+                    <div className="flex items-center gap-3 py-2">
+                      <div className="p-1 bg-primary/20 rounded">
+                        <Globe className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <span className="font-medium">Main Domain</span>
+                        <p className="text-xs text-muted-foreground">{site?.domain}</p>
+                      </div>
                     </div>
                   </SelectItem>
                   {subdomains.map((sub: any) => (
                     <SelectItem key={sub.subdomain} value={sub.subdomain}>
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4" />
-                        <span>{sub.subdomain}</span>
-                        {sub.type && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${
-                            sub.type === 'subdomain' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                          }`}>
-                            {sub.type}
-                          </span>
-                        )}
-                        {sub.hasWordPress && (
-                          <span className="text-xs text-green-600">(WordPress)</span>
-                        )}
+                      <div className="flex items-center gap-3 py-2">
+                        <div className="p-1 bg-blue-500/20 rounded">
+                          <Globe className="h-4 w-4 text-blue-500" />
+                        </div>
+                        <div className="flex-1">
+                          <span className="font-medium">{sub.subdomain}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            {sub.type && (
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                sub.type === 'subdomain' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 
+                                'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                              }`}>
+                                {sub.type}
+                              </span>
+                            )}
+                            {sub.hasWordPress && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                                WordPress
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-sm text-muted-foreground">
-                Currently selected: {currentDomain}
-              </p>
-              {subdomains.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {subdomains.filter((s: any) => s.type === 'subdomain').length} subdomain(s), {subdomains.filter((s: any) => s.type === 'addon').length} addon domain(s)
-                </p>
-              )}
-              {subdomains.length === 0 && !isLoadingSubdomains && (
-                <p className="text-xs text-yellow-600">
-                  No additional domains detected. Click Refresh to detect again.
-                </p>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Diagnosis Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'diagnosis' | 'history')} className="scroll-mt-6">
-        <TabsList className="grid w-full grid-cols-2 sticky top-0 z-10 bg-background">
-          <TabsTrigger value="diagnosis">
-            <Activity className="mr-2 h-4 w-4" />
-            Diagnosis
-          </TabsTrigger>
-          <TabsTrigger value="history">
-            <History className="mr-2 h-4 w-4" />
-            History
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="diagnosis" className="space-y-6">
-          {/* Profile Selection */}
-          {!diagnosis && !executionId && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Select Diagnosis Profile</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Select value={selectedProfile} onValueChange={(v) => setSelectedProfile(v as any)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FULL">
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">Full Diagnosis</span>
-                        <span className="text-xs text-muted-foreground">All checks, 120s timeout</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="LIGHT">
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">Light Diagnosis</span>
-                        <span className="text-xs text-muted-foreground">Critical checks only, 60s timeout</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="QUICK">
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">Quick Check</span>
-                        <span className="text-xs text-muted-foreground">HTTP + maintenance, 30s timeout</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="CUSTOM">
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">Custom</span>
-                        <span className="text-xs text-muted-foreground">Select specific checks</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <div className="text-center py-8 border-2 border-dashed rounded-lg">
-                  <Activity className="mx-auto h-12 w-12 text-muted-foreground" />
-                  <h3 className="mt-4 text-lg font-semibold">Ready to Diagnose</h3>
-                  <p className="mt-2 text-muted-foreground">
-                    {selectedProfile === 'FULL' && 'Comprehensive analysis with all checks'}
-                    {selectedProfile === 'LIGHT' && 'Quick health check with critical checks only'}
-                    {selectedProfile === 'QUICK' && 'Fast status verification'}
-                    {selectedProfile === 'CUSTOM' && 'Custom check selection'}
-                  </p>
-                  <Button
-                    onClick={() => diagnoseMutation.mutate()}
-                    disabled={diagnoseMutation.isPending}
-                    size="lg"
-                    className="mt-6"
-                  >
-                    <Activity className="mr-2 h-4 w-4" />
-                    {diagnoseMutation.isPending ? 'Diagnosing...' : `Start ${selectedProfile} Diagnosis`}
-                  </Button>
+              
+              <div className="bg-muted/30 rounded-lg p-4">
+                <div className="flex items-center space-x-2 text-sm">
+                  <Globe className="h-4 w-4 text-primary" />
+                  <span className="text-muted-foreground">Currently selected:</span>
+                  <span className="font-medium text-primary">{currentDomain}</span>
                 </div>
-              </CardContent>
-            </Card>
+                {subdomains.length > 0 && (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Found {subdomains.filter((s: any) => s.type === 'subdomain').length} subdomain(s) and {subdomains.filter((s: any) => s.type === 'addon').length} addon domain(s)
+                  </div>
+                )}
+                {subdomains.length === 0 && !isLoadingSubdomains && (
+                  <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                    No additional domains detected. Click "Refresh Domains" to scan again.
+                  </div>
+                )}
+              </div>
+            </div>
           )}
+        </div>
+
+        {/* Enhanced Diagnosis Tabs */}
+        <div className="bg-card/40 backdrop-blur-sm border rounded-xl p-1 shadow-sm">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'diagnosis' | 'history')} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 bg-muted/50 p-1 h-12">
+              <TabsTrigger 
+                value="diagnosis" 
+                className="flex items-center space-x-2 data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+              >
+                <div className="p-1 rounded bg-primary/10">
+                  <Activity className="h-4 w-4 text-primary" />
+                </div>
+                <span className="font-medium">Diagnosis & Healing</span>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="history" 
+                className="flex items-center space-x-2 data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+              >
+                <div className="p-1 rounded bg-primary/10">
+                  <History className="h-4 w-4 text-primary" />
+                </div>
+                <span className="font-medium">Execution History</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="p-6">
+              <TabsContent value="diagnosis" className="space-y-6 mt-0">
+                {/* Enhanced Profile Selection */}
+                {!diagnosis && !executionId && (
+                  <div className="bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/20 rounded-xl p-6">
+                    <div className="flex items-center space-x-3 mb-6">
+                      <div className="p-2 bg-primary/20 rounded-lg">
+                        <Wrench className="h-6 w-6 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">WordPress Diagnosis</h3>
+                        <p className="text-sm text-muted-foreground">Select a diagnosis profile to analyze your site</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      {[
+                        {
+                          value: 'FULL',
+                          title: 'Full Diagnosis',
+                          description: 'Comprehensive analysis with all checks',
+                          duration: '~2-3 minutes',
+                          icon: '🔍',
+                          color: 'from-blue-500/10 to-blue-600/10 border-blue-500/20'
+                        },
+                        {
+                          value: 'LIGHT',
+                          title: 'Light Diagnosis',
+                          description: 'Critical checks only for quick assessment',
+                          duration: '~1 minute',
+                          icon: '⚡',
+                          color: 'from-green-500/10 to-green-600/10 border-green-500/20'
+                        },
+                        {
+                          value: 'QUICK',
+                          title: 'Quick Check',
+                          description: 'HTTP status and maintenance mode only',
+                          duration: '~30 seconds',
+                          icon: '🚀',
+                          color: 'from-yellow-500/10 to-yellow-600/10 border-yellow-500/20'
+                        },
+                        {
+                          value: 'CUSTOM',
+                          title: 'Custom Profile',
+                          description: 'Select specific checks to run',
+                          duration: 'Variable',
+                          icon: '⚙️',
+                          color: 'from-purple-500/10 to-purple-600/10 border-purple-500/20'
+                        }
+                      ].map((profile) => (
+                        <div
+                          key={profile.value}
+                          className={`bg-gradient-to-r ${profile.color} border rounded-lg p-4 cursor-pointer transition-all duration-200 hover:scale-105 ${
+                            selectedProfile === profile.value ? 'ring-2 ring-primary shadow-lg' : ''
+                          }`}
+                          onClick={() => setSelectedProfile(profile.value as any)}
+                        >
+                          <div className="flex items-start space-x-3">
+                            <div className="text-2xl">{profile.icon}</div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-sm">{profile.title}</h4>
+                              <p className="text-xs text-muted-foreground mt-1">{profile.description}</p>
+                              <div className="flex items-center space-x-2 mt-2">
+                                <span className="text-xs bg-background/50 px-2 py-1 rounded">{profile.duration}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="text-center">
+                      <Button
+                        onClick={() => diagnoseMutation.mutate()}
+                        disabled={diagnoseMutation.isPending}
+                        size="lg"
+                        className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl transition-all duration-200"
+                      >
+                        {diagnoseMutation.isPending ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Running {selectedProfile} Diagnosis...
+                          </>
+                        ) : (
+                          <>
+                            <Activity className="mr-2 h-4 w-4" />
+                            Start {selectedProfile} Diagnosis
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
           {/* Diagnosis Results */}
           {diagnosis && !execution && (
@@ -582,22 +788,28 @@ export function SiteDetailView({ siteId, onBack }: SiteDetailViewProps) {
           )}
         </TabsContent>
 
-        <TabsContent value="history">
-          <Card>
-            <CardHeader>
-              <CardTitle>Diagnosis History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                View past diagnosis results and health score trends
-              </p>
-              <div className="mt-4 text-center text-sm text-muted-foreground">
-                History view coming soon...
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              <TabsContent value="history" className="mt-0">
+                <div className="bg-gradient-to-r from-muted/30 to-muted/10 border rounded-xl p-8 text-center">
+                  <div className="text-6xl mb-4">📊</div>
+                  <h3 className="text-xl font-bold mb-2">History Coming Soon</h3>
+                  <p className="text-muted-foreground mb-4">
+                    View past diagnosis results, health score trends, and healing history
+                  </p>
+                  <div className="text-sm text-muted-foreground">
+                    This feature will include:
+                    <ul className="list-disc list-inside mt-2 space-y-1">
+                      <li>Historical health scores and trends</li>
+                      <li>Past diagnosis results comparison</li>
+                      <li>Healing success/failure rates</li>
+                      <li>Performance metrics over time</li>
+                    </ul>
+                  </div>
+                </div>
+              </TabsContent>
+            </div>
+          </Tabs>
+        </div>
+      </div>
     </div>
   );
 }

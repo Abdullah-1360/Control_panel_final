@@ -21,11 +21,34 @@ export class EventStreamController {
     private eventBus: EventBusService,
   ) {}
 
+  @Sse('test')
+  testStream(@Req() req: Request): Observable<MessageEvent> {
+    this.logger.log(`Test SSE connection established`);
+    
+    return interval(1000).pipe(
+      map((count) => ({
+        data: JSON.stringify({
+          type: 'test',
+          data: { count, timestamp: new Date() },
+          timestamp: new Date(),
+        }),
+        id: Date.now().toString(),
+        type: 'test',
+      })),
+    );
+  }
+
   @Sse('stream')
   stream(@Req() req: Request): Observable<MessageEvent> {
     const user = req.user as any;
     
-    this.logger.log(`SSE connection established for user: ${user.id}`);
+    this.logger.log(`SSE connection established for user: ${user?.id || 'undefined'}`);
+    this.logger.log(`SSE connection from IP: ${req.ip}`);
+    this.logger.log(`SSE connection headers: ${JSON.stringify({
+      'user-agent': req.headers['user-agent'],
+      'accept': req.headers['accept'],
+      'cache-control': req.headers['cache-control']
+    })}`);
 
     // Create observables for each event type
     const incidentEvents$ = fromEvent(
@@ -93,6 +116,11 @@ export class EventStreamController {
       SystemEvent.SLO_BREACHED,
     );
 
+    const diagnosisProgressEvents$ = fromEvent(
+      this.eventBus['eventEmitter'],
+      SystemEvent.DIAGNOSIS_PROGRESS,
+    );
+
     // Heartbeat to keep connection alive (every 30 seconds)
     const heartbeat$ = interval(30000).pipe(
       map(() => ({
@@ -117,6 +145,7 @@ export class EventStreamController {
       automationFailedEvents$,
       notificationEvents$,
       sloEvents$,
+      diagnosisProgressEvents$,
       heartbeat$,
     ).pipe(
       // Filter by user permissions
@@ -135,6 +164,15 @@ export class EventStreamController {
           type: event.type,
           retry: 10000, // Retry after 10s if connection drops
         };
+
+        // Log diagnosis progress events for debugging
+        if (event.type === SystemEvent.DIAGNOSIS_PROGRESS) {
+          this.logger.debug(`[SSE] Sending diagnosis progress event: ${JSON.stringify({
+            diagnosisId: event.data?.diagnosisId,
+            status: event.data?.status,
+            progress: event.data?.progress,
+          })}`);
+        }
 
         return messageEvent;
       }),

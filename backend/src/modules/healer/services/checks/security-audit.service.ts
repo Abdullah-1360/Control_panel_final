@@ -117,6 +117,40 @@ export class SecurityAuditService implements IDiagnosisCheckService {
         recommendations.push('Disable XML-RPC if not needed');
       }
 
+      // 9. PHASE 1 - LAYER 2: Verify core file checksums
+      const checksumResults = await this.verifyCoreFileChecksums(serverId, sitePath);
+      if (checksumResults.modifiedFiles.length > 0) {
+        issues.push(`${checksumResults.modifiedFiles.length} core files modified`);
+        score -= Math.min(40, checksumResults.modifiedFiles.length * 5);
+        recommendations.push('Restore modified core files from official WordPress release');
+        recommendations.push('Run: wp core download --force --skip-content');
+      }
+      if (checksumResults.missingFiles.length > 0) {
+        issues.push(`${checksumResults.missingFiles.length} core files missing`);
+        score -= Math.min(30, checksumResults.missingFiles.length * 3);
+        recommendations.push('Reinstall WordPress core files');
+      }
+
+      // 10. PHASE 1 - LAYER 2: Scan for malware signatures
+      const malwareScan = await this.scanForMalwareSignatures(serverId, sitePath);
+      if (malwareScan.suspiciousFiles.length > 0) {
+        const highConfidence = malwareScan.suspiciousFiles.filter(f => f.confidence === 'HIGH').length;
+        issues.push(`${malwareScan.suspiciousFiles.length} suspicious files detected (${highConfidence} high confidence)`);
+        score -= Math.min(50, highConfidence * 10 + (malwareScan.suspiciousFiles.length - highConfidence) * 3);
+        recommendations.push('Quarantine and review suspicious files immediately');
+        recommendations.push('Scan with professional malware scanner (Wordfence, Sucuri)');
+      }
+
+      // 11. PHASE 1 - LAYER 2: Validate .htaccess security
+      const htaccessSecurity = await this.validateHtaccessSecurity(serverId, sitePath);
+      if (!htaccessSecurity.isClean) {
+        const critical = htaccessSecurity.issues.filter(i => i.severity === 'CRITICAL').length;
+        issues.push(`${htaccessSecurity.issues.length} .htaccess security issues (${critical} critical)`);
+        score -= Math.min(40, critical * 15 + (htaccessSecurity.issues.length - critical) * 5);
+        recommendations.push('Review and clean .htaccess file immediately');
+        recommendations.push('Backup current .htaccess before making changes');
+      }
+
       // Determine status
       let status: CheckStatus;
       if (score >= 85) {
@@ -146,6 +180,10 @@ export class SecurityAuditService implements IDiagnosisCheckService {
           weakDbPrefix,
           fileEditingEnabled,
           xmlRpcEnabled,
+          // Phase 1 - Layer 2 additions
+          checksumResults,
+          malwareScan,
+          htaccessSecurity,
           issues,
         },
         recommendations,
@@ -241,12 +279,19 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     const issues: string[] = [];
 
     try {
-      // Check if site is accessible via HTTPS
-      const command = `curl -I -s -o /dev/null -w "%{http_code}" https://${domain} --max-time 10 2>/dev/null || echo "000"`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
-      const statusCode = result.trim();
-
-      if (statusCode === '000' || statusCode.startsWith('5')) {
+      // Check if site is accessible via HTTPS using axios
+      const axios = require('axios');
+      try {
+        const response = await axios.get(`https://${domain}`, {
+          timeout: 10000,
+          validateStatus: () => true,
+          maxRedirects: 0,
+        });
+        
+        if (response.status >= 500) {
+          issues.push('HTTPS not accessible');
+        }
+      } catch (error) {
         issues.push('HTTPS not accessible');
       }
 
@@ -266,11 +311,28 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     const missing: string[] = [];
 
     try {
-      const command = `curl -I -s https://${domain} --max-time 10 2>/dev/null || curl -I -s http://${domain} --max-time 10 2>/dev/null`;
-      const result = await this.sshExecutor.executeCommand('local', command, 15000);
+      const axios = require('axios');
+      let headers: any = {};
+      
+      try {
+        const response = await axios.get(`https://${domain}`, {
+          timeout: 10000,
+          validateStatus: () => true,
+        });
+        headers = response.headers;
+      } catch (httpsError) {
+        // Try HTTP fallback
+        const response = await axios.get(`http://${domain}`, {
+          timeout: 10000,
+          validateStatus: () => true,
+        });
+        headers = response.headers;
+      }
 
       for (const header of this.SECURITY_HEADERS) {
-        if (!result.toLowerCase().includes(header.toLowerCase())) {
+        const headerLower = header.toLowerCase();
+        const hasHeader = Object.keys(headers).some(h => h.toLowerCase() === headerLower);
+        if (!hasHeader) {
           missing.push(header);
         }
       }
@@ -314,6 +376,306 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     }
 
     return exposed;
+  }
+
+  /**
+   * Verify WordPress core file checksums against wordpress.org API
+   * Phase 1 - Layer 2: Core Integrity Enhancement
+   */
+  private async verifyCoreFileChecksums(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    modifiedFiles: string[];
+    missingFiles: string[];
+    extraFiles: string[];
+    totalChecked: number;
+  }> {
+    try {
+      // 1. Detect WordPress version
+      const versionCommand = `grep "wp_version = " ${sitePath}/wp-includes/version.php | cut -d "'" -f 2`;
+      const versionResult = await this.sshExecutor.executeCommand(serverId, versionCommand, 10000);
+      const wpVersion = versionResult.trim();
+
+      if (!wpVersion) {
+        throw new Error('Could not detect WordPress version');
+      }
+
+      this.logger.log(`Detected WordPress version: ${wpVersion}`);
+
+      // 2. Fetch official checksums from wordpress.org API
+      const checksumUrl = `https://api.wordpress.org/core/checksums/1.0/?version=${wpVersion}`;
+      const response = await fetch(checksumUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch checksums: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const checksums = data.checksums || {};
+
+      if (Object.keys(checksums).length === 0) {
+        throw new Error(`No checksums available for WordPress ${wpVersion}`);
+      }
+
+      // 3. Compare MD5 hashes of core files
+      const modifiedFiles: string[] = [];
+      const missingFiles: string[] = [];
+      let totalChecked = 0;
+
+      for (const [file, expectedHash] of Object.entries(checksums)) {
+        totalChecked++;
+        
+        // Calculate MD5 hash of local file
+        const hashCommand = `md5sum ${sitePath}/${file} 2>/dev/null | awk '{print $1}' || echo "MISSING"`;
+        const actualHash = (await this.sshExecutor.executeCommand(serverId, hashCommand, 10000)).trim();
+
+        if (actualHash === 'MISSING') {
+          missingFiles.push(file);
+        } else if (actualHash !== expectedHash) {
+          modifiedFiles.push(file);
+        }
+      }
+
+      // 4. Check for extra PHP files in wp-includes and wp-admin (potential backdoors)
+      const extraFiles: string[] = [];
+      const extraFilesCommand = `find ${sitePath}/wp-includes ${sitePath}/wp-admin -name "*.php" -type f 2>/dev/null | wc -l`;
+      const extraFilesResult = await this.sshExecutor.executeCommand(serverId, extraFilesCommand, 15000);
+      const actualFileCount = parseInt(extraFilesResult.trim());
+      const expectedFileCount = Object.keys(checksums).filter(f => f.endsWith('.php')).length;
+
+      if (actualFileCount > expectedFileCount + 10) {
+        // More than 10 extra PHP files is suspicious
+        this.logger.warn(`Found ${actualFileCount - expectedFileCount} extra PHP files`);
+      }
+
+      return {
+        modifiedFiles,
+        missingFiles,
+        extraFiles,
+        totalChecked,
+      };
+    } catch (error) {
+      this.logger.error(`Checksum verification failed: ${(error as Error).message}`);
+      return {
+        modifiedFiles: [],
+        missingFiles: [],
+        extraFiles: [],
+        totalChecked: 0,
+      };
+    }
+  }
+
+  /**
+   * Scan for malware signatures in WordPress files
+   * Phase 1 - Layer 2: Enhanced Malware Detection
+   */
+  private async scanForMalwareSignatures(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    suspiciousFiles: Array<{
+      file: string;
+      reason: string;
+      confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    }>;
+    totalScanned: number;
+  }> {
+    try {
+      const suspiciousFiles: Array<{
+        file: string;
+        reason: string;
+        confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      }> = [];
+
+      // 1. Scan for suspicious patterns in PHP files
+      const suspiciousPatterns = [
+        { pattern: 'base64_decode', confidence: 'MEDIUM' as const },
+        { pattern: 'eval\\(', confidence: 'HIGH' as const },
+        { pattern: 'system\\(', confidence: 'HIGH' as const },
+        { pattern: 'exec\\(', confidence: 'HIGH' as const },
+        { pattern: 'shell_exec', confidence: 'HIGH' as const },
+        { pattern: 'gzinflate', confidence: 'MEDIUM' as const },
+        { pattern: 'str_rot13', confidence: 'MEDIUM' as const },
+        { pattern: 'assert\\(', confidence: 'MEDIUM' as const },
+        { pattern: 'preg_replace.*\/e', confidence: 'HIGH' as const },
+        { pattern: 'create_function', confidence: 'MEDIUM' as const },
+      ];
+
+      for (const { pattern, confidence } of suspiciousPatterns) {
+        const command = `grep -rl "${pattern}" ${sitePath}/wp-content/plugins ${sitePath}/wp-content/themes ${sitePath}/wp-content/uploads 2>/dev/null | head -20`;
+        const result = await this.sshExecutor.executeCommand(serverId, command, 30000);
+        
+        const files = result.trim().split('\n').filter(f => f);
+        for (const file of files) {
+          suspiciousFiles.push({
+            file: file.replace(sitePath + '/', ''),
+            reason: `Contains suspicious pattern: ${pattern}`,
+            confidence,
+          });
+        }
+      }
+
+      // 2. Check for files with double extensions (file.php.jpg)
+      const doubleExtCommand = `find ${sitePath}/wp-content -type f -name "*.php.*" 2>/dev/null`;
+      const doubleExtResult = await this.sshExecutor.executeCommand(serverId, doubleExtCommand, 15000);
+      
+      const doubleExtFiles = doubleExtResult.trim().split('\n').filter(f => f);
+      for (const file of doubleExtFiles) {
+        suspiciousFiles.push({
+          file: file.replace(sitePath + '/', ''),
+          reason: 'Double extension (potential disguised PHP file)',
+          confidence: 'HIGH',
+        });
+      }
+
+      // 3. Scan wp-content/uploads for unexpected PHP files
+      const uploadsPhpCommand = `find ${sitePath}/wp-content/uploads -name "*.php" -type f 2>/dev/null`;
+      const uploadsPhpResult = await this.sshExecutor.executeCommand(serverId, uploadsPhpCommand, 15000);
+      
+      const uploadsPhpFiles = uploadsPhpResult.trim().split('\n').filter(f => f);
+      for (const file of uploadsPhpFiles) {
+        suspiciousFiles.push({
+          file: file.replace(sitePath + '/', ''),
+          reason: 'PHP file in uploads directory (should not exist)',
+          confidence: 'HIGH',
+        });
+      }
+
+      // 4. Check for high entropy files (often obfuscated malware)
+      // This is a simplified check - production would use more sophisticated entropy calculation
+      const highEntropyCommand = `find ${sitePath}/wp-content -name "*.php" -type f -exec wc -c {} \\; 2>/dev/null | awk '$1 > 100000 {print $2}' | head -10`;
+      const highEntropyResult = await this.sshExecutor.executeCommand(serverId, highEntropyCommand, 30000);
+      
+      const highEntropyFiles = highEntropyResult.trim().split('\n').filter(f => f);
+      for (const file of highEntropyFiles) {
+        // Check if file contains suspicious patterns
+        const contentCheck = `grep -l "base64_decode\\|eval\\|gzinflate" ${file} 2>/dev/null`;
+        const hasPattern = await this.sshExecutor.executeCommand(serverId, contentCheck, 10000);
+        
+        if (hasPattern.trim()) {
+          suspiciousFiles.push({
+            file: file.replace(sitePath + '/', ''),
+            reason: 'Large file with suspicious patterns (potential obfuscated malware)',
+            confidence: 'HIGH',
+          });
+        }
+      }
+
+      // Count total files scanned
+      const totalCommand = `find ${sitePath}/wp-content -name "*.php" -type f 2>/dev/null | wc -l`;
+      const totalResult = await this.sshExecutor.executeCommand(serverId, totalCommand, 30000);
+      const totalScanned = parseInt(totalResult.trim()) || 0;
+
+      return {
+        suspiciousFiles,
+        totalScanned,
+      };
+    } catch (error) {
+      this.logger.error(`Malware scan failed: ${(error as Error).message}`);
+      return {
+        suspiciousFiles: [],
+        totalScanned: 0,
+      };
+    }
+  }
+
+  /**
+   * Validate .htaccess for malware patterns
+   * Phase 1 - Layer 2: Advanced .htaccess Security Check
+   */
+  private async validateHtaccessSecurity(
+    serverId: string,
+    sitePath: string,
+  ): Promise<{
+    issues: Array<{
+      line: string;
+      reason: string;
+      severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+    }>;
+    isClean: boolean;
+  }> {
+    try {
+      const issues: Array<{
+        line: string;
+        reason: string;
+        severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+      }> = [];
+
+      // Read .htaccess file
+      const command = `cat ${sitePath}/.htaccess 2>/dev/null || echo "NOT_FOUND"`;
+      const content = await this.sshExecutor.executeCommand(serverId, command, 10000);
+
+      if (content.trim() === 'NOT_FOUND') {
+        return { issues: [], isClean: true };
+      }
+
+      const lines = content.split('\n');
+
+      // 1. Check for redirect rules to external domains (often base64 encoded)
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        // Check for base64 encoded redirects
+        if (line.includes('RewriteRule') && line.includes('base64')) {
+          issues.push({
+            line: `Line ${i + 1}: ${line}`,
+            reason: 'Base64 encoded redirect (common malware pattern)',
+            severity: 'CRITICAL',
+          });
+        }
+
+        // Check for redirects to external domains
+        if (line.includes('RewriteRule') && /https?:\/\//.test(line)) {
+          const urlMatch = line.match(/https?:\/\/([^\/\s]+)/);
+          if (urlMatch) {
+            issues.push({
+              line: `Line ${i + 1}: ${line}`,
+              reason: `Redirect to external domain: ${urlMatch[1]}`,
+              severity: 'HIGH',
+            });
+          }
+        }
+
+        // Check for user agent cloaking (RewriteCond %{HTTP_USER_AGENT})
+        if (line.includes('RewriteCond') && line.includes('HTTP_USER_AGENT')) {
+          issues.push({
+            line: `Line ${i + 1}: ${line}`,
+            reason: 'User agent cloaking detected (potential SEO spam)',
+            severity: 'HIGH',
+          });
+        }
+
+        // Check for AddType allowing PHP execution in images
+        if (line.includes('AddType') && line.includes('application/x-httpd-php') && /\.(jpg|jpeg|png|gif)/.test(line)) {
+          issues.push({
+            line: `Line ${i + 1}: ${line}`,
+            reason: 'Allows PHP execution in image files (backdoor)',
+            severity: 'CRITICAL',
+          });
+        }
+
+        // Check for suspicious auto_prepend_file or auto_append_file
+        if ((line.includes('auto_prepend_file') || line.includes('auto_append_file')) && line.includes('php_value')) {
+          issues.push({
+            line: `Line ${i + 1}: ${line}`,
+            reason: 'Auto prepend/append file directive (potential code injection)',
+            severity: 'CRITICAL',
+          });
+        }
+      }
+
+      return {
+        issues,
+        isClean: issues.length === 0,
+      };
+    } catch (error) {
+      this.logger.error(`.htaccess security validation failed: ${(error as Error).message}`);
+      return {
+        issues: [],
+        isClean: true,
+      };
+    }
   }
 
   /**

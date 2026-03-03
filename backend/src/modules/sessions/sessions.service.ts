@@ -55,8 +55,15 @@ export class SessionsService {
       this.prisma.sessions.count({ where }),
     ]);
 
+    // Map the data to match frontend expectations (user instead of users)
+    const mappedSessions = sessions.map(session => ({
+      ...session,
+      user: session.users, // Map users to user for frontend compatibility
+      users: undefined, // Remove the original users property
+    }));
+
     return {
-      data: sessions,
+      data: mappedSessions,
       pagination: {
         total,
         page,

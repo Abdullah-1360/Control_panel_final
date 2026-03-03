@@ -1,11 +1,14 @@
 import { apiClient } from './client';
+import { TechStack as TechStackEnum } from '@/types/healer';
+
+export type TechStack = 'UNKNOWN' | 'WORDPRESS' | 'NODEJS' | 'PHP' | 'PHP_GENERIC' | 'LARAVEL' | 'NEXTJS' | 'EXPRESS';
 
 export interface Application {
   id: string;
   serverId: string;
   domain: string;
   path: string;
-  techStack: 'UNKNOWN' | 'WORDPRESS' | 'NODEJS' | 'PHP' | 'PHP_GENERIC' | 'LARAVEL' | 'NEXTJS' | 'EXPRESS';
+  techStack: TechStack;
   detectionMethod: 'AUTO' | 'MANUAL' | 'HYBRID';
   version?: string;
   phpVersion?: string;
@@ -16,6 +19,9 @@ export interface Application {
   healthStatus: 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'MAINTENANCE' | 'HEALING' | 'UNKNOWN';
   healthScore: number;
   lastDiagnosedAt?: string;
+  lastHealedAt?: string;
+  techStackVersion?: string;
+  metadata?: any; // JSONB field for flexible metadata storage
   createdAt: string;
   updatedAt: string;
   servers?: {
@@ -31,8 +37,10 @@ export interface DiagnosticResult {
   applicationId: string;
   checkName: string;
   checkCategory: 'SYSTEM' | 'DATABASE' | 'APPLICATION' | 'SECURITY' | 'PERFORMANCE' | 'CONFIGURATION' | 'DEPENDENCIES';
-  status: 'PASS' | 'FAIL' | 'WARN' | 'ERROR' | 'SKIPPED';
+  category?: 'SYSTEM' | 'DATABASE' | 'APPLICATION' | 'SECURITY' | 'PERFORMANCE' | 'CONFIGURATION' | 'DEPENDENCIES'; // Alias for checkCategory
+  status: 'PASS' | 'FAIL' | 'WARN' | 'WARNING' | 'ERROR' | 'SKIPPED';
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; // Alias for severity
   message: string;
   details?: any;
   suggestedFix?: string | null;
@@ -143,8 +151,25 @@ export const healerApi = {
       forceRefresh?: boolean;
       subdomain?: string;
     },
-  ): Promise<{ message: string; applicationId: string }> => {
-    return await apiClient.post(`/healer/applications/${id}/diagnose`, data || {});
+  ): Promise<{ 
+    diagnosisId?: string;
+    message?: string; 
+    applicationId: string;
+    subdomain?: string | null;
+    techStack?: string;
+    checksExecuted?: number;
+    results?: any[];
+  }> => {
+    console.log('[healerApi] diagnoseApplication called with:', { id, data });
+    console.log('[healerApi] Making POST request to:', `/healer/applications/${id}/diagnose`);
+    try {
+      const result = await apiClient.post(`/healer/applications/${id}/diagnose`, data || {});
+      console.log('[healerApi] diagnoseApplication response:', result);
+      return result;
+    } catch (error) {
+      console.error('[healerApi] diagnoseApplication error:', error);
+      throw error;
+    }
   },
 
   getDiagnostics: async (
@@ -153,6 +178,23 @@ export const healerApi = {
   ): Promise<{ applicationId: string; results: DiagnosticResult[] }> => {
     const queryParams = limit ? `?limit=${limit}` : '';
     return await apiClient.get(`/healer/applications/${id}/diagnostics${queryParams}`);
+  },
+
+  getDiagnosticResults: async (applicationId: string, limit: number = 50): Promise<{ applicationId: string; results: DiagnosticResult[] }> => {
+    return apiClient.get(`/healer/applications/${applicationId}/diagnostics?limit=${limit}`);
+  },
+
+  getDiagnosisProgress: async (diagnosisId: string): Promise<any> => {
+    console.log('[healerApi] getDiagnosisProgress called with diagnosisId:', diagnosisId);
+    try {
+      const result = await apiClient.get(`/healer/applications/diagnosis/${diagnosisId}/progress`);
+      console.log('[healerApi] getDiagnosisProgress response:', result);
+      // Extract data from wrapper
+      return result.data || result;
+    } catch (error) {
+      console.error('[healerApi] getDiagnosisProgress error:', error);
+      throw error;
+    }
   },
 
   getHealthScore: async (id: string): Promise<{ applicationId: string; healthScore: number }> => {

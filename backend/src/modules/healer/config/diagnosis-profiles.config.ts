@@ -14,50 +14,98 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
   [DiagnosisProfile.FULL]: {
     profile: DiagnosisProfile.FULL,
     checks: [
-      // Critical checks
+      // Layer 1: Availability & Accessibility
       DiagnosisCheckType.HTTP_STATUS,
+      DiagnosisCheckType.DNS_RESOLUTION,
+      DiagnosisCheckType.SSL_CERTIFICATE_VALIDATION,
+      DiagnosisCheckType.MIXED_CONTENT_DETECTION,
+      DiagnosisCheckType.RESPONSE_TIME_BASELINE,
       DiagnosisCheckType.MAINTENANCE_MODE,
-      DiagnosisCheckType.DATABASE_CONNECTION,
-      DiagnosisCheckType.WP_VERSION,
-      // Standard checks
+      
+      // Layer 2: Core WordPress Integrity
       DiagnosisCheckType.CORE_INTEGRITY,
-      DiagnosisCheckType.PHP_ERRORS,
-      DiagnosisCheckType.APACHE_NGINX_LOGS,
-      DiagnosisCheckType.DISK_SPACE,
-      DiagnosisCheckType.FILE_PERMISSIONS,
-      DiagnosisCheckType.HTACCESS,
-      DiagnosisCheckType.WP_CONFIG,
-      DiagnosisCheckType.MEMORY_LIMIT,
-      DiagnosisCheckType.SSL_CERTIFICATE,
-      // Advanced checks
-      DiagnosisCheckType.PLUGIN_STATUS,
-      DiagnosisCheckType.THEME_STATUS,
+      DiagnosisCheckType.CHECKSUM_VERIFICATION,
+      DiagnosisCheckType.SECURITY_AUDIT,
+      DiagnosisCheckType.WP_VERSION,
+      
+      // Layer 3: Configuration Validation
+      DiagnosisCheckType.SECURITY_KEYS_VALIDATION,
+      
+      // Layer 4: Database Health
+      DiagnosisCheckType.DATABASE_CONNECTION,
+      DiagnosisCheckType.DATABASE_HEALTH,
+      DiagnosisCheckType.TABLE_CORRUPTION_CHECK,
+      DiagnosisCheckType.ORPHANED_TRANSIENTS_DETECTION,
+      
+      // Layer 5: Performance & Resource Monitoring
+      DiagnosisCheckType.PERFORMANCE_METRICS,
+      DiagnosisCheckType.RESOURCE_MONITORING,
+      DiagnosisCheckType.UPTIME_MONITORING,
+      
+      // Layer 6: Plugin & Theme Analysis
+      DiagnosisCheckType.PLUGIN_THEME_ANALYSIS, // Comprehensive analysis includes plugin/theme status
       DiagnosisCheckType.UPDATE_STATUS,
+      
+      // Layer 7: Error Log Analysis
+      DiagnosisCheckType.ERROR_LOG_ANALYSIS,
+      
+      // Layer 8: Security Hardening
+      DiagnosisCheckType.MALWARE_DETECTION,
+      DiagnosisCheckType.LOGIN_ATTEMPT_ANALYSIS,
+      DiagnosisCheckType.BACKDOOR_DETECTION,
+      
+      // Additional Health Checks
+      DiagnosisCheckType.SEO_HEALTH,
+      DiagnosisCheckType.BACKUP_STATUS,
     ],
-    timeout: 120000, // 120 seconds
-    logDepth: 500,
+    timeout: 300000, // 300 seconds (5 minutes) - increased for comprehensive checks
+    logDepth: 1000,
     parallelExecution: true,
     useCache: false,
     cacheTTL: 0,
-    description: 'Complete diagnosis with all checks - for manual diagnosis',
+    description: 'Comprehensive diagnosis with 28+ checks across WordPress layers',
   },
 
   [DiagnosisProfile.LIGHT]: {
     profile: DiagnosisProfile.LIGHT,
     checks: [
+      // Layer 1: Critical availability checks
       DiagnosisCheckType.HTTP_STATUS,
+      DiagnosisCheckType.DNS_RESOLUTION,
       DiagnosisCheckType.MAINTENANCE_MODE,
       DiagnosisCheckType.DATABASE_CONNECTION,
-      DiagnosisCheckType.WP_VERSION,
-      DiagnosisCheckType.PHP_ERRORS,
-      DiagnosisCheckType.DISK_SPACE,
+      
+      // Layer 2: Core integrity
+      DiagnosisCheckType.SECURITY_AUDIT,
+      DiagnosisCheckType.CHECKSUM_VERIFICATION,
+      
+      // Layer 3: Configuration validation
+      DiagnosisCheckType.SECURITY_KEYS_VALIDATION,
+      
+      // Layer 4: Database health
+      DiagnosisCheckType.DATABASE_HEALTH,
+      DiagnosisCheckType.TABLE_CORRUPTION_CHECK,
+      
+      // Layer 5: Performance
+      DiagnosisCheckType.PERFORMANCE_METRICS,
+      
+      // Layer 6: Updates
+      DiagnosisCheckType.UPDATE_STATUS,
+      
+      // Layer 7: Error logs
+      DiagnosisCheckType.ERROR_LOG_ANALYSIS,
+      
+      // Layer 8: Security
+      DiagnosisCheckType.MALWARE_DETECTION,
+      DiagnosisCheckType.LOGIN_ATTEMPT_ANALYSIS,
+      DiagnosisCheckType.BACKDOOR_DETECTION,
     ],
-    timeout: 60000, // 60 seconds
+    timeout: 120000, // 120 seconds (increased for additional checks)
     logDepth: 100,
     parallelExecution: true,
     useCache: true,
     cacheTTL: 300, // 5 minutes
-    description: 'Critical checks only - for scheduled auto-diagnosis',
+    description: 'Essential checks for scheduled auto-diagnosis with enhanced security validation',
   },
 
   [DiagnosisProfile.QUICK]: {
@@ -65,6 +113,7 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
     checks: [
       DiagnosisCheckType.HTTP_STATUS,
       DiagnosisCheckType.MAINTENANCE_MODE,
+      DiagnosisCheckType.DATABASE_CONNECTION,
     ],
     timeout: 30000, // 30 seconds
     logDepth: 0,

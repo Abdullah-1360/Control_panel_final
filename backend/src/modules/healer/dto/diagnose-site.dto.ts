@@ -47,6 +47,11 @@ export class DiagnoseSiteDto {
  * DTO for diagnosis result
  */
 export interface DiagnosisResultDto {
+  // Identification
+  diagnosisId?: string; // PHASE 4: For real-time progress tracking
+  siteId?: string;
+  domain?: string;
+  
   // Profile & Configuration
   profile: DiagnosisProfile;
   checksRun: DiagnosisCheckType[];
@@ -69,11 +74,18 @@ export interface DiagnosisResultDto {
     errorMessage?: string;
     logFiles?: string[];
     affectedComponents?: string[];
+    // PHASE 2: Correlation Engine insights
+    correlation?: {
+      rootCauses: any[];
+      correlationConfidence: number;
+      criticalIssuesCount: number;
+    };
   };
   
   // Suggested Actions
   suggestedAction?: string;
   suggestedCommands?: string[];
+  recommendations?: string[]; // PHASE 2: Prioritized recommendations from correlation engine
   canAutoHeal: boolean;
   requiresApproval: boolean;
   

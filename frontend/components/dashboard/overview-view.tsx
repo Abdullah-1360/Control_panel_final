@@ -220,7 +220,12 @@ export function OverviewView({ onViewChange }: OverviewViewProps) {
 
   // Recent activity (from server test status)
   const recentActivity = useMemo(() => {
-    const activities = []
+    const activities: Array<{
+      icon: any;
+      text: string;
+      time: string;
+      color: string;
+    }> = [];
     
     // Add activities from servers
     servers.slice(0, 6).forEach((server) => {

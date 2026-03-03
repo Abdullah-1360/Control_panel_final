@@ -3,9 +3,11 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { DiagnosisType, HealthStatus, HealerTrigger, HealerStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { DiagnosisService } from './diagnosis.service';
+import { UnifiedDiagnosisService } from './unified-diagnosis.service';
 import { BackupService } from './backup.service';
 import { PatternLearningService } from './pattern-learning.service';
+import { DiagnosisProfile } from '../enums/diagnosis-profile.enum';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class HealingOrchestratorService {
@@ -13,7 +15,7 @@ export class HealingOrchestratorService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly diagnosisService: DiagnosisService,
+    private readonly diagnosisService: UnifiedDiagnosisService,
     private readonly backupService: BackupService,
     private readonly patternLearning: PatternLearningService,
     @InjectQueue('healer-jobs') private readonly healerQueue: Queue,
@@ -58,19 +60,28 @@ export class HealingOrchestratorService {
         throw new Error('Rate limit exceeded - please wait before diagnosing again');
       }
 
-      // Perform diagnosis
+      // Generate diagnosis ID for progress tracking
+      const diagnosisId = uuidv4();
+      this.logger.log(`Starting diagnosis with ID: ${diagnosisId}`);
+
+      // Perform diagnosis using UnifiedDiagnosisService
       const diagnosis = await this.diagnosisService.diagnose(
-        site.serverId,
-        diagnosisPath,
-        diagnosisDomain,
+        siteId,
+        DiagnosisProfile.FULL,
+        {
+          diagnosisId, // Pass diagnosisId for progress tracking
+          subdomain,
+          triggeredBy,
+          trigger: triggeredBy ? HealerTrigger.MANUAL : HealerTrigger.SEARCH,
+        },
       );
 
       // Get learned pattern suggestions
       const patternSuggestions = await this.patternLearning.suggestCommands(diagnosis);
 
       // Use pattern suggestions if available and confident, otherwise use diagnosis suggestions
-      let suggestedCommands = diagnosis.suggestedCommands;
-      let suggestedAction = diagnosis.suggestedAction;
+      let suggestedCommands = diagnosis.suggestedCommands || [];
+      let suggestedAction = diagnosis.suggestedAction || 'No action suggested';
       let patternId: string | undefined;
 
       if (patternSuggestions.length > 0) {
@@ -89,9 +100,18 @@ export class HealingOrchestratorService {
           subdomain, // Store subdomain for healing process
           trigger: triggeredBy ? HealerTrigger.MANUAL : HealerTrigger.SEARCH,
           triggeredBy,
-          diagnosisType: diagnosis.diagnosisType,
+          diagnosisType: diagnosis.diagnosisType as DiagnosisType,
           diagnosisDetails: JSON.stringify({
-            ...diagnosis.details,
+            diagnosisType: diagnosis.diagnosisType,
+            confidence: diagnosis.confidence,
+            healthScore: diagnosis.healthScore,
+            issuesFound: diagnosis.issuesFound,
+            criticalIssues: diagnosis.criticalIssues,
+            warningIssues: diagnosis.warningIssues,
+            details: diagnosis.details,
+            suggestedAction,
+            suggestedCommands,
+            checkResults: diagnosis.checkResults, // Include check results
             patternId, // Store pattern ID for learning
             patternSuggestions: patternSuggestions.map(p => ({
               confidence: p.confidence,
@@ -102,7 +122,7 @@ export class HealingOrchestratorService {
             diagnosisDomain, // Store the domain that was diagnosed
           }),
           confidence: diagnosis.confidence,
-          logsAnalyzed: JSON.stringify(diagnosis.logsAnalyzed),
+          logsAnalyzed: JSON.stringify(diagnosis.details.logFiles || []),
           suggestedAction,
           suggestedCommands: JSON.stringify(suggestedCommands),
           status: HealerStatus.DIAGNOSED,
@@ -127,7 +147,7 @@ export class HealingOrchestratorService {
         where: { id: siteId },
         data: {
           lastDiagnosedAt: new Date(),
-          healthStatus: this.mapDiagnosisToHealthStatus(diagnosis.diagnosisType),
+          healthStatus: this.mapDiagnosisToHealthStatus(diagnosis.diagnosisType as DiagnosisType),
         },
       });
 
@@ -135,6 +155,7 @@ export class HealingOrchestratorService {
 
       return {
         executionId: execution.id,
+        diagnosisId, // Return diagnosisId for progress tracking
         diagnosis,
       };
     } catch (error) {

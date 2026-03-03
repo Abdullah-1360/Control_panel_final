@@ -19,10 +19,35 @@ import { BackupStatusService } from './checks/backup-status.service';
 import { ResourceMonitoringService } from './checks/resource-monitoring.service';
 import { PluginThemeAnalysisService } from './checks/plugin-theme-analysis.service';
 import { UptimeMonitoringService } from './checks/uptime-monitoring.service';
+import { ErrorLogAnalysisService } from './checks/error-log-analysis.service';
+import { HttpStatusService } from './checks/http-status.service';
+import { MaintenanceModeService } from './checks/maintenance-mode.service';
+import { DatabaseConnectionService } from './checks/database-connection.service';
+import { WpVersionService } from './checks/wp-version.service';
+import { CoreIntegrityService } from './checks/core-integrity.service';
+import { PluginStatusService } from './checks/plugin-status.service';
+import { ThemeStatusService } from './checks/theme-status.service';
+import { CorrelationEngineService } from './correlation-engine.service';
+import { DiagnosisProgressService } from './diagnosis-progress.service';
+// New Layer 1 services
+import { DnsResolutionService } from './checks/dns-resolution.service';
+import { SslCertificateValidationService } from './checks/ssl-certificate-validation.service';
+// New comprehensive check services
+import { MixedContentDetectionService } from './checks/mixed-content-detection.service';
+import { ResponseTimeBaselineService } from './checks/response-time-baseline.service';
+import { ChecksumVerificationService } from './checks/checksum-verification.service';
+import { TableCorruptionCheckService } from './checks/table-corruption-check.service';
+import { LoginAttemptAnalysisService } from './checks/login-attempt-analysis.service';
+import { SecurityKeysValidationService } from './checks/security-keys-validation.service';
+import { OrphanedTransientsDetectionService } from './checks/orphaned-transients-detection.service';
+import { BackdoorDetectionService } from './checks/backdoor-detection.service';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Unified Diagnosis Service
  * Combines manual and auto diagnosis with profile-based configuration
+ * PHASE 2: Integrated with Correlation Engine for root cause analysis
+ * PHASE 4: Real-time progress tracking via SSE
  */
 @Injectable()
 export class UnifiedDiagnosisService {
@@ -42,9 +67,32 @@ export class UnifiedDiagnosisService {
     private readonly resourceMonitoring: ResourceMonitoringService,
     private readonly pluginThemeAnalysis: PluginThemeAnalysisService,
     private readonly uptimeMonitoring: UptimeMonitoringService,
+    private readonly errorLogAnalysis: ErrorLogAnalysisService,
+    private readonly httpStatus: HttpStatusService,
+    private readonly maintenanceMode: MaintenanceModeService,
+    private readonly databaseConnection: DatabaseConnectionService,
+    private readonly wpVersion: WpVersionService,
+    private readonly coreIntegrity: CoreIntegrityService,
+    private readonly pluginStatus: PluginStatusService,
+    private readonly themeStatus: ThemeStatusService,
+    private readonly correlationEngine: CorrelationEngineService,
+    private readonly diagnosisProgress: DiagnosisProgressService,
+    // New Layer 1 services
+    private readonly dnsResolution: DnsResolutionService,
+    private readonly sslCertificateValidation: SslCertificateValidationService,
+    // New comprehensive check services
+    private readonly mixedContentDetection: MixedContentDetectionService,
+    private readonly responseTimeBaseline: ResponseTimeBaselineService,
+    private readonly checksumVerification: ChecksumVerificationService,
+    private readonly tableCorruptionCheck: TableCorruptionCheckService,
+    private readonly loginAttemptAnalysis: LoginAttemptAnalysisService,
+    private readonly securityKeysValidation: SecurityKeysValidationService,
+    private readonly orphanedTransientsDetection: OrphanedTransientsDetectionService,
+    private readonly backdoorDetection: BackdoorDetectionService,
   ) {
     // Initialize check services map
     this.checkServices = new Map<DiagnosisCheckType, IDiagnosisCheckService>([
+      // Existing services
       [DiagnosisCheckType.MALWARE_DETECTION, malwareDetection],
       [DiagnosisCheckType.SECURITY_AUDIT, securityAudit],
       [DiagnosisCheckType.PERFORMANCE_METRICS, performanceMetrics],
@@ -55,24 +103,55 @@ export class UnifiedDiagnosisService {
       [DiagnosisCheckType.RESOURCE_MONITORING, resourceMonitoring],
       [DiagnosisCheckType.PLUGIN_THEME_ANALYSIS, pluginThemeAnalysis],
       [DiagnosisCheckType.UPTIME_MONITORING, uptimeMonitoring],
+      [DiagnosisCheckType.ERROR_LOG_ANALYSIS, errorLogAnalysis],
+      [DiagnosisCheckType.HTTP_STATUS, httpStatus],
+      [DiagnosisCheckType.MAINTENANCE_MODE, maintenanceMode],
+      [DiagnosisCheckType.DATABASE_CONNECTION, databaseConnection],
+      [DiagnosisCheckType.WP_VERSION, wpVersion],
+      [DiagnosisCheckType.CORE_INTEGRITY, coreIntegrity],
+      [DiagnosisCheckType.PLUGIN_STATUS, pluginStatus],
+      [DiagnosisCheckType.THEME_STATUS, themeStatus],
+      
+      // New Layer 1: Availability & Accessibility
+      [DiagnosisCheckType.DNS_RESOLUTION, dnsResolution],
+      [DiagnosisCheckType.SSL_CERTIFICATE_VALIDATION, sslCertificateValidation],
+      [DiagnosisCheckType.MIXED_CONTENT_DETECTION, mixedContentDetection],
+      [DiagnosisCheckType.RESPONSE_TIME_BASELINE, responseTimeBaseline],
+      
+      // New Layer 2: Core WordPress Integrity
+      [DiagnosisCheckType.CHECKSUM_VERIFICATION, checksumVerification],
+      
+      // New Layer 3: Configuration Validation
+      [DiagnosisCheckType.SECURITY_KEYS_VALIDATION, securityKeysValidation],
+      
+      // New Layer 4: Database Health
+      [DiagnosisCheckType.TABLE_CORRUPTION_CHECK, tableCorruptionCheck],
+      [DiagnosisCheckType.ORPHANED_TRANSIENTS_DETECTION, orphanedTransientsDetection],
+      
+      // New Layer 8: Security Hardening
+      [DiagnosisCheckType.LOGIN_ATTEMPT_ANALYSIS, loginAttemptAnalysis],
+      [DiagnosisCheckType.BACKDOOR_DETECTION, backdoorDetection],
     ]);
   }
 
   /**
    * Diagnose a site with specified profile
+   * PHASE 4: Real-time progress tracking via SSE
    */
   async diagnose(
     siteId: string,
     profile: DiagnosisProfile = DiagnosisProfile.FULL,
     options: {
+      diagnosisId?: string; // Accept diagnosisId from caller
       customChecks?: DiagnosisCheckType[];
       subdomain?: string;
       bypassCache?: boolean;
       triggeredBy?: string;
       trigger?: HealerTrigger;
     } = {},
-  ): Promise<DiagnosisResultDto> {
+  ): Promise<DiagnosisResultDto & { diagnosisId?: string }> {
     const startTime = Date.now();
+    const diagnosisId = options.diagnosisId || uuidv4(); // Use provided diagnosisId or generate new one
     
     // Get site details
     const site = await this.prisma.wp_sites.findUnique({
@@ -91,94 +170,152 @@ export class UnifiedDiagnosisService {
     const config = getProfileConfig(profile, options.customChecks);
     
     this.logger.log(
-      `Starting ${profile} diagnosis for ${domain} (${config.checks.length} checks)`,
+      `Starting ${profile} diagnosis for ${domain} (${config.checks.length} checks) [ID: ${diagnosisId}]`,
     );
 
-    // Check cache if enabled and not bypassed
-    if (config.useCache && !options.bypassCache) {
-      const cached = await this.getCachedResult(
+    // PHASE 4: Start progress tracking
+    this.diagnosisProgress.startDiagnosis(
+      diagnosisId,
+      siteId,
+      domain,
+      config.checks.length,
+    );
+
+    try {
+      // Check cache if enabled and not bypassed
+      if (config.useCache && !options.bypassCache) {
+        const cached = await this.getCachedResult(
+          site.serverId,
+          site.path,
+          domain,
+          profile,
+        );
+        
+        if (cached) {
+          this.logger.log(`Returning cached diagnosis for ${domain}`);
+          this.diagnosisProgress.completeDiagnosis(diagnosisId, cached.healthScore);
+          return { ...cached, diagnosisId };
+        }
+      }
+
+      // PHASE 4: Set status to running
+      this.diagnosisProgress.setRunning(diagnosisId);
+
+      // Execute checks based on profile with progress tracking
+      const checkResults = await this.executeChecksWithProgress(
+        diagnosisId,
         site.serverId,
         site.path,
         domain,
+        config.checks,
+      );
+
+      // PHASE 4: Set status to correlating
+      this.diagnosisProgress.setCorrelating(diagnosisId);
+
+      // PHASE 2: Run correlation analysis on check results
+      const correlationResult = await this.correlationEngine.correlateResults(checkResults);
+
+      // Run legacy diagnosis for backward compatibility
+      const diagnosisResult = await this.diagnosisService.diagnose(
+        site.serverId,
+        site.path,
+        domain,
+      );
+
+      // Use correlation engine's health score if available, otherwise calculate from checks
+      const healthScore = correlationResult.overallHealthScore > 0 
+        ? correlationResult.overallHealthScore 
+        : this.calculateHealthScoreFromChecks(checkResults);
+      
+      const categoryScores = this.calculateCategoryScores(checkResults);
+
+      // Build unified result with correlation insights
+      const result: DiagnosisResultDto & { diagnosisId?: string } = {
+        diagnosisId,
         profile,
+        checksRun: config.checks,
+        healthScore,
+        issuesFound: this.countIssuesFromChecks(checkResults),
+        criticalIssues: this.countCriticalIssuesFromChecks(checkResults),
+        warningIssues: this.countWarningIssuesFromChecks(checkResults),
+        diagnosisType: diagnosisResult.diagnosisType,
+        confidence: diagnosisResult.confidence,
+        details: {
+          ...diagnosisResult.details,
+          // PHASE 2: Add correlation insights
+          correlation: {
+            rootCauses: correlationResult.rootCauses,
+            correlationConfidence: correlationResult.correlationConfidence,
+            criticalIssuesCount: correlationResult.criticalIssues.length,
+          },
+        },
+        suggestedAction: diagnosisResult.suggestedAction,
+        suggestedCommands: diagnosisResult.suggestedCommands,
+        // PHASE 2: Use correlation recommendations if available
+        recommendations: correlationResult.recommendations.length > 0 
+          ? correlationResult.recommendations 
+          : diagnosisResult.suggestedCommands,
+        canAutoHeal: this.canAutoHeal(diagnosisResult.diagnosisType),
+        requiresApproval: site.healingMode !== 'FULL_AUTO',
+        checkResults: this.convertCheckResults(checkResults),
+        duration: Date.now() - startTime,
+        timestamp: new Date(),
+        cached: false,
+      };
+
+      // Save to history
+      await this.saveToHistory(siteId, domain, result, options);
+
+      // Update site health status
+      await this.updateSiteHealth(siteId, healthScore, diagnosisResult.diagnosisType);
+
+      // Save health score history with category scores
+      await this.saveHealthScoreHistory(siteId, result.healthScore, this.getHealthStatus(healthScore, diagnosisResult.diagnosisType), categoryScores);
+
+      // Cache result if enabled
+      if (config.useCache) {
+        await this.cacheResult(
+          site.serverId,
+          site.path,
+          domain,
+          profile,
+          result,
+          config.cacheTTL,
+        );
+      }
+
+      // PHASE 4: Complete progress tracking
+      this.logger.log(`[UnifiedDiagnosisService] Calling completeDiagnosis for ${diagnosisId} with healthScore ${healthScore}`);
+      this.diagnosisProgress.completeDiagnosis(diagnosisId, healthScore);
+      
+      // Verify completion was set
+      const finalProgress = this.diagnosisProgress.getProgress(diagnosisId);
+      this.logger.log(`[UnifiedDiagnosisService] Final progress status: ${finalProgress?.status}, progress: ${finalProgress?.progress}%`);
+
+      this.logger.log(
+        `Diagnosis completed for ${domain}: ${diagnosisResult.diagnosisType} (score: ${healthScore}) [ID: ${diagnosisId}]`,
+      );
+
+      return result;
+    } catch (error) {
+      // PHASE 4: Mark diagnosis as failed
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`[UnifiedDiagnosisService] Diagnosis error, calling failDiagnosis for ${diagnosisId}: ${errorMessage}`);
+      this.diagnosisProgress.failDiagnosis(diagnosisId, errorMessage);
+      
+      this.logger.error(
+        `Diagnosis failed for ${domain}: ${errorMessage} [ID: ${diagnosisId}]`,
+        error instanceof Error ? error.stack : undefined,
       );
       
-      if (cached) {
-        this.logger.log(`Returning cached diagnosis for ${domain}`);
-        return cached;
-      }
+      throw error;
     }
-
-    // Execute checks based on profile
-    const checkResults = await this.executeChecks(
-      site.serverId,
-      site.path,
-      domain,
-      config.checks,
-    );
-
-    // Run legacy diagnosis for backward compatibility
-    const diagnosisResult = await this.diagnosisService.diagnose(
-      site.serverId,
-      site.path,
-      domain,
-    );
-
-    // Calculate health score from check results
-    const healthScore = this.calculateHealthScoreFromChecks(checkResults);
-    const categoryScores = this.calculateCategoryScores(checkResults);
-
-    // Build unified result
-    const result: DiagnosisResultDto = {
-      profile,
-      checksRun: config.checks,
-      healthScore,
-      issuesFound: this.countIssuesFromChecks(checkResults),
-      criticalIssues: this.countCriticalIssuesFromChecks(checkResults),
-      warningIssues: this.countWarningIssuesFromChecks(checkResults),
-      diagnosisType: diagnosisResult.diagnosisType,
-      confidence: diagnosisResult.confidence,
-      details: diagnosisResult.details,
-      suggestedAction: diagnosisResult.suggestedAction,
-      suggestedCommands: diagnosisResult.suggestedCommands,
-      canAutoHeal: this.canAutoHeal(diagnosisResult.diagnosisType),
-      requiresApproval: site.healingMode !== 'FULL_AUTO',
-      checkResults: this.convertCheckResults(checkResults),
-      duration: Date.now() - startTime,
-      timestamp: new Date(),
-      cached: false,
-    };
-
-    // Save to history
-    await this.saveToHistory(siteId, domain, result, options);
-
-    // Update site health status
-    await this.updateSiteHealth(siteId, healthScore, diagnosisResult.diagnosisType);
-
-    // Save health score history with category scores
-    await this.saveHealthScoreHistory(siteId, result.healthScore, this.getHealthStatus(healthScore, diagnosisResult.diagnosisType), categoryScores);
-
-    // Cache result if enabled
-    if (config.useCache) {
-      await this.cacheResult(
-        site.serverId,
-        site.path,
-        domain,
-        profile,
-        result,
-        config.cacheTTL,
-      );
-    }
-
-    this.logger.log(
-      `Diagnosis completed for ${domain}: ${diagnosisResult.diagnosisType} (score: ${healthScore})`,
-    );
-
-    return result;
   }
 
   /**
    * Execute checks based on profile
+   * PHASE 4: Enhanced with timeout handling, comprehensive error handling, and parallel execution
    */
   private async executeChecks(
     serverId: string,
@@ -186,35 +323,582 @@ export class UnifiedDiagnosisService {
     domain: string,
     checks: DiagnosisCheckType[],
   ): Promise<CheckResult[]> {
-    const results: CheckResult[] = [];
+    // PHASE 4: Task 1.3 - Parallel execution for independent checks
+    return await this.executeChecksInParallel(serverId, sitePath, domain, checks);
+  }
 
-    for (const checkType of checks) {
-      const service = this.checkServices.get(checkType);
-      
-      if (!service) {
-        this.logger.warn(`No service found for check type: ${checkType}`);
-        continue;
-      }
+  /**
+   * Execute checks with real-time progress tracking
+   * PHASE 4: Real-time progress tracking via SSE
+   */
+  private async executeChecksWithProgress(
+    diagnosisId: string,
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checks: DiagnosisCheckType[],
+  ): Promise<CheckResult[]> {
+    // Group checks by dependency
+    const independentChecks = this.getIndependentChecks(checks);
+    const databaseDependentChecks = this.getDatabaseDependentChecks(checks);
+    const otherChecks = checks.filter(
+      (check) =>
+        !independentChecks.includes(check) &&
+        !databaseDependentChecks.includes(check),
+    );
 
-      try {
-        const result = await service.check(serverId, sitePath, domain);
-        results.push(result);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`Check ${checkType} failed: ${errorMessage}`);
-        results.push({
-          checkType,
-          status: CheckStatus.ERROR,
-          score: 0,
-          message: `Check failed: ${errorMessage}`,
-          details: { error: errorMessage },
-          duration: 0,
-          timestamp: new Date(),
-        });
-      }
+    this.logger.log(
+      `Executing checks: ${independentChecks.length} independent, ${databaseDependentChecks.length} DB-dependent, ${otherChecks.length} other`,
+    );
+
+    const allResults: CheckResult[] = [];
+
+    // Execute independent checks in parallel with progress tracking
+    const independentResults = await Promise.allSettled(
+      independentChecks.map((checkType) =>
+        this.executeCheckWithProgressTracking(diagnosisId, serverId, sitePath, domain, checkType),
+      ),
+    );
+    allResults.push(...this.extractResults(independentResults, independentChecks));
+
+    // Execute database-dependent checks in parallel with progress tracking
+    const dbResults = await Promise.allSettled(
+      databaseDependentChecks.map((checkType) =>
+        this.executeCheckWithProgressTracking(diagnosisId, serverId, sitePath, domain, checkType),
+      ),
+    );
+    allResults.push(...this.extractResults(dbResults, databaseDependentChecks));
+
+    // Execute remaining checks sequentially with progress tracking
+    const otherResults = await Promise.allSettled(
+      otherChecks.map((checkType) =>
+        this.executeCheckWithProgressTracking(diagnosisId, serverId, sitePath, domain, checkType),
+      ),
+    );
+    allResults.push(...this.extractResults(otherResults, otherChecks));
+
+    return allResults;
+  }
+
+  /**
+   * Execute a single check with progress tracking
+   * PHASE 4: Real-time progress tracking via SSE
+   */
+  private async executeCheckWithProgressTracking(
+    diagnosisId: string,
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checkType: DiagnosisCheckType,
+  ): Promise<CheckResult> {
+    const service = this.checkServices.get(checkType);
+    
+    if (!service) {
+      this.logger.warn(`No service found for check type: ${checkType}`);
+      return this.createErrorResult(checkType, 'Service not registered', Date.now());
     }
 
-    return results;
+    // Notify check started
+    this.diagnosisProgress.checkStarted(
+      diagnosisId,
+      checkType,
+      service.getName(),
+      this.getCategoryForCheck(checkType),
+    );
+
+    const startTime = Date.now();
+    
+    try {
+      // Execute check with timeout
+      const result = await this.executeCheckWithTimeout(
+        serverId,
+        sitePath,
+        domain,
+        checkType,
+      );
+
+      // Notify check completed
+      this.diagnosisProgress.checkCompleted(
+        diagnosisId,
+        checkType,
+        result.status as 'PASS' | 'FAIL' | 'WARNING' | 'ERROR',
+        result.message,
+        result.duration,
+      );
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const duration = Date.now() - startTime;
+
+      // Notify check failed
+      this.diagnosisProgress.checkCompleted(
+        diagnosisId,
+        checkType,
+        'ERROR',
+        errorMessage,
+        duration,
+      );
+
+      return this.createErrorResult(checkType, errorMessage, startTime);
+    }
+  }
+
+  /**
+   * Get category for a check type
+   */
+  private getCategoryForCheck(checkType: DiagnosisCheckType): string {
+    const categoryMap: Partial<Record<DiagnosisCheckType, string>> = {
+      [DiagnosisCheckType.MALWARE_DETECTION]: 'SECURITY',
+      [DiagnosisCheckType.SECURITY_AUDIT]: 'SECURITY',
+      [DiagnosisCheckType.CORE_INTEGRITY]: 'SECURITY',
+      [DiagnosisCheckType.PERFORMANCE_METRICS]: 'PERFORMANCE',
+      [DiagnosisCheckType.DATABASE_HEALTH]: 'PERFORMANCE',
+      [DiagnosisCheckType.RESOURCE_MONITORING]: 'PERFORMANCE',
+      [DiagnosisCheckType.UPDATE_STATUS]: 'MAINTENANCE',
+      [DiagnosisCheckType.BACKUP_STATUS]: 'MAINTENANCE',
+      [DiagnosisCheckType.PLUGIN_THEME_ANALYSIS]: 'MAINTENANCE',
+      [DiagnosisCheckType.PLUGIN_STATUS]: 'MAINTENANCE',
+      [DiagnosisCheckType.THEME_STATUS]: 'MAINTENANCE',
+      [DiagnosisCheckType.WP_VERSION]: 'MAINTENANCE',
+      [DiagnosisCheckType.SEO_HEALTH]: 'SEO',
+      [DiagnosisCheckType.UPTIME_MONITORING]: 'AVAILABILITY',
+      [DiagnosisCheckType.HTTP_STATUS]: 'AVAILABILITY',
+      [DiagnosisCheckType.DATABASE_CONNECTION]: 'AVAILABILITY',
+      [DiagnosisCheckType.MAINTENANCE_MODE]: 'CONFIGURATION',
+      [DiagnosisCheckType.ERROR_LOG_ANALYSIS]: 'SYSTEM',
+    };
+
+    return categoryMap[checkType] || 'SYSTEM';
+  }
+
+  /**
+   * Extract results from Promise.allSettled results
+   */
+  private extractResults(
+    results: PromiseSettledResult<CheckResult>[],
+    checkTypes: DiagnosisCheckType[],
+  ): CheckResult[] {
+    return results.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        const checkType = checkTypes[index];
+        this.logger.error(
+          `Check ${checkType} promise rejected: ${result.reason}`,
+        );
+        return this.createErrorResult(
+          checkType,
+          result.reason?.message || 'Promise rejected',
+          Date.now(),
+        );
+      }
+    });
+  }
+
+  /**
+   * Execute checks in parallel where possible
+   * PHASE 4: Task 1.3 - Parallel check execution
+   */
+  private async executeChecksInParallel(
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checks: DiagnosisCheckType[],
+  ): Promise<CheckResult[]> {
+    // Group checks by dependency
+    const independentChecks = this.getIndependentChecks(checks);
+    const databaseDependentChecks = this.getDatabaseDependentChecks(checks);
+    const otherChecks = checks.filter(
+      (check) =>
+        !independentChecks.includes(check) &&
+        !databaseDependentChecks.includes(check),
+    );
+
+    this.logger.log(
+      `Executing checks: ${independentChecks.length} independent, ${databaseDependentChecks.length} DB-dependent, ${otherChecks.length} other`,
+    );
+
+    // Execute independent checks in parallel
+    const independentResults = await Promise.allSettled(
+      independentChecks.map((checkType) =>
+        this.executeCheckWithTimeout(serverId, sitePath, domain, checkType),
+      ),
+    );
+
+    // Execute database-dependent checks in parallel (after DB connection verified)
+    const dbResults = await Promise.allSettled(
+      databaseDependentChecks.map((checkType) =>
+        this.executeCheckWithTimeout(serverId, sitePath, domain, checkType),
+      ),
+    );
+
+    // Execute remaining checks sequentially
+    const otherResults = await Promise.allSettled(
+      otherChecks.map((checkType) =>
+        this.executeCheckWithTimeout(serverId, sitePath, domain, checkType),
+      ),
+    );
+
+    // Combine all results
+    const allResults = [
+      ...independentResults,
+      ...dbResults,
+      ...otherResults,
+    ];
+
+    // Extract successful results and handle failures
+    return allResults.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        // Handle rejected promise
+        const checkType = [
+          ...independentChecks,
+          ...databaseDependentChecks,
+          ...otherChecks,
+        ][index];
+        
+        this.logger.error(
+          `Check ${checkType} promise rejected: ${result.reason}`,
+        );
+
+        return this.createErrorResult(
+          checkType,
+          result.reason?.message || 'Promise rejected',
+          Date.now(),
+        );
+      }
+    });
+  }
+
+  /**
+   * Get list of checks that can run independently (no dependencies)
+   */
+  private getIndependentChecks(
+    checks: DiagnosisCheckType[],
+  ): DiagnosisCheckType[] {
+    const independent = [
+      DiagnosisCheckType.HTTP_STATUS,
+      DiagnosisCheckType.SSL_CERTIFICATE,
+      DiagnosisCheckType.DISK_SPACE,
+      DiagnosisCheckType.MEMORY_LIMIT,
+      DiagnosisCheckType.FILE_PERMISSIONS,
+      DiagnosisCheckType.HTACCESS,
+      DiagnosisCheckType.WP_CONFIG,
+      DiagnosisCheckType.PHP_ERRORS,
+      DiagnosisCheckType.APACHE_NGINX_LOGS,
+      DiagnosisCheckType.CORE_INTEGRITY,
+      DiagnosisCheckType.WP_VERSION,
+      DiagnosisCheckType.MAINTENANCE_MODE,
+      DiagnosisCheckType.PERFORMANCE_METRICS,
+      DiagnosisCheckType.RESOURCE_MONITORING,
+      DiagnosisCheckType.ERROR_LOG_ANALYSIS,
+    ];
+
+    return checks.filter((check) => independent.includes(check));
+  }
+
+  /**
+   * Get list of checks that depend on database connection
+   */
+  private getDatabaseDependentChecks(
+    checks: DiagnosisCheckType[],
+  ): DiagnosisCheckType[] {
+    const dbDependent = [
+      DiagnosisCheckType.DATABASE_CONNECTION,
+      DiagnosisCheckType.DATABASE_HEALTH,
+      DiagnosisCheckType.PLUGIN_STATUS,
+      DiagnosisCheckType.THEME_STATUS,
+      DiagnosisCheckType.UPDATE_STATUS,
+      DiagnosisCheckType.PLUGIN_THEME_ANALYSIS,
+      DiagnosisCheckType.MALWARE_DETECTION, // Needs DB for content injection check
+      DiagnosisCheckType.SECURITY_AUDIT,
+      DiagnosisCheckType.SEO_HEALTH,
+      DiagnosisCheckType.BACKUP_STATUS,
+      DiagnosisCheckType.UPTIME_MONITORING,
+    ];
+
+    return checks.filter((check) => dbDependent.includes(check));
+  }
+
+  /**
+   * Execute a single check with timeout and comprehensive error handling
+   * PHASE 4: Task 1.6 - Comprehensive error handling
+   * PHASE 4: Task 1.4 - Caching for expensive checks
+   */
+  private async executeCheckWithTimeout(
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checkType: DiagnosisCheckType,
+  ): Promise<CheckResult> {
+    const startTime = Date.now();
+    const checkTimeout = 60000; // 60 seconds per check
+
+    try {
+      const service = this.checkServices.get(checkType);
+
+      if (!service) {
+        this.logger.warn(`No service found for check type: ${checkType}`);
+        return this.createErrorResult(
+          checkType,
+          'Service not registered',
+          startTime,
+        );
+      }
+
+      // PHASE 4: Task 1.4 - Check cache for expensive checks
+      const cachedResult = await this.getCheckCache(
+        serverId,
+        sitePath,
+        domain,
+        checkType,
+      );
+
+      if (cachedResult) {
+        this.logger.debug(`Using cached result for check ${checkType}`);
+        return {
+          ...cachedResult,
+          timestamp: new Date(), // Update timestamp
+        };
+      }
+
+      // Execute check with timeout
+      const result = await Promise.race([
+        service.check(serverId, sitePath, domain),
+        this.createTimeoutPromise(checkTimeout, checkType),
+      ]);
+
+      // Log successful execution
+      this.logger.debug(
+        `Check ${checkType} completed in ${result.duration}ms with status ${result.status}`,
+      );
+
+      // PHASE 4: Task 1.4 - Cache expensive checks
+      await this.cacheCheckResult(
+        serverId,
+        sitePath,
+        domain,
+        checkType,
+        result,
+      );
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const duration = Date.now() - startTime;
+
+      // Determine if it's a timeout error
+      const isTimeout = errorMessage.includes('timed out');
+
+      if (isTimeout) {
+        this.logger.error(
+          `Check ${checkType} timed out after ${duration}ms`,
+        );
+      } else {
+        this.logger.error(
+          `Check ${checkType} failed after ${duration}ms: ${errorMessage}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+
+      return this.createErrorResult(checkType, errorMessage, startTime);
+    }
+  }
+
+  /**
+   * Get cached check result if available
+   * PHASE 4: Task 1.4 - Caching for expensive checks
+   */
+  private async getCheckCache(
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checkType: DiagnosisCheckType,
+  ): Promise<CheckResult | null> {
+    // Only cache expensive checks
+    const expensiveChecks = [
+      DiagnosisCheckType.CORE_INTEGRITY, // WordPress core checksums
+      DiagnosisCheckType.PLUGIN_THEME_ANALYSIS, // Vulnerability scans
+      DiagnosisCheckType.MALWARE_DETECTION, // Malware scanning
+    ];
+
+    if (!expensiveChecks.includes(checkType)) {
+      return null;
+    }
+
+    try {
+      // Use a special profile value for check-level caching
+      const cacheProfile = DiagnosisProfile.CUSTOM; // Use CUSTOM profile for check caching
+      
+      const cached = await this.prisma.diagnosis_cache.findUnique({
+        where: {
+          serverId_sitePath_domain_profile: {
+            serverId,
+            sitePath,
+            domain,
+            profile: cacheProfile,
+          },
+        },
+      });
+
+      if (!cached) {
+        return null;
+      }
+
+      // Check if cache is still valid
+      const now = new Date();
+      if (cached.expiresAt < now) {
+        // Cache expired, delete it
+        await this.prisma.diagnosis_cache.delete({
+          where: {
+            serverId_sitePath_domain_profile: {
+              serverId,
+              sitePath,
+              domain,
+              profile: cacheProfile,
+            },
+          },
+        });
+        return null;
+      }
+
+      // Parse and return cached result
+      // Store check type in result to identify which check is cached
+      const cachedData = cached.result as any;
+      if (cachedData && cachedData.checkType === checkType) {
+        return cachedData as CheckResult;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to get check cache for ${checkType}: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Cache check result for expensive checks
+   * PHASE 4: Task 1.4 - Caching for expensive checks
+   */
+  private async cacheCheckResult(
+    serverId: string,
+    sitePath: string,
+    domain: string,
+    checkType: DiagnosisCheckType,
+    result: CheckResult,
+  ): Promise<void> {
+    // Define cache TTL for expensive checks
+    const cacheTTLMap: Record<string, number> = {
+      [DiagnosisCheckType.CORE_INTEGRITY]: 86400, // 24 hours
+      [DiagnosisCheckType.PLUGIN_THEME_ANALYSIS]: 21600, // 6 hours
+      [DiagnosisCheckType.MALWARE_DETECTION]: 3600, // 1 hour
+    };
+
+    const cacheTTL = cacheTTLMap[checkType];
+    if (!cacheTTL) {
+      return; // Don't cache this check
+    }
+
+    try {
+      const cacheProfile = DiagnosisProfile.CUSTOM; // Use CUSTOM profile for check caching
+      const expiresAt = new Date(Date.now() + cacheTTL * 1000);
+
+      await this.prisma.diagnosis_cache.upsert({
+        where: {
+          serverId_sitePath_domain_profile: {
+            serverId,
+            sitePath,
+            domain,
+            profile: cacheProfile,
+          },
+        },
+        create: {
+          serverId,
+          sitePath,
+          domain,
+          profile: cacheProfile,
+          result: result as any,
+          expiresAt,
+        },
+        update: {
+          result: result as any,
+          expiresAt,
+          lastAccessedAt: new Date(),
+          hitCount: {
+            increment: 1,
+          },
+        },
+      });
+
+      this.logger.debug(
+        `Cached check ${checkType} result for ${cacheTTL}s`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to cache check result for ${checkType}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Create a timeout promise that rejects after specified milliseconds
+   */
+  private createTimeoutPromise(
+    timeoutMs: number,
+    checkType: DiagnosisCheckType,
+  ): Promise<never> {
+    return new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Check ${checkType} timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+    });
+  }
+
+  /**
+   * Create an error result for a failed check
+   */
+  private createErrorResult(
+    checkType: DiagnosisCheckType,
+    errorMessage: string,
+    startTime: number,
+  ): CheckResult {
+    const duration = Date.now() - startTime;
+    const isTimeout = errorMessage.includes('timed out');
+
+    return {
+      checkType,
+      status: CheckStatus.ERROR,
+      score: 0,
+      message: isTimeout
+        ? `Check timed out: ${errorMessage}`
+        : `Check failed: ${errorMessage}`,
+      details: {
+        error: errorMessage,
+        isTimeout,
+        duration,
+      },
+      recommendations: isTimeout
+        ? [
+            'Check may be taking too long due to server load',
+            'Verify SSH connection is stable',
+            'Consider increasing timeout for this check',
+          ]
+        : [
+            'Retry the check',
+            'Verify server connectivity',
+            'Check server logs for more details',
+          ],
+      duration,
+      timestamp: new Date(),
+    };
   }
 
   /**

@@ -23,6 +23,18 @@ export function TechStackBadge({
   size = 'md',
   className 
 }: TechStackBadgeProps) {
+  const sizeClasses = {
+    sm: 'text-xs px-2 py-0.5',
+    md: 'text-sm px-2.5 py-1',
+    lg: 'text-base px-3 py-1.5',
+  };
+  
+  const iconSizes = {
+    sm: 'h-3 w-3',
+    md: 'h-4 w-4',
+    lg: 'h-5 w-5',
+  };
+  
   const info = getTechStackInfo(techStack);
   
   // Fallback for unknown tech stacks
@@ -43,18 +55,6 @@ export function TechStackBadge({
   }
   
   const Icon = (Icons as any)[info.icon] || Icons.HelpCircle;
-  
-  const sizeClasses = {
-    sm: 'text-xs px-2 py-0.5',
-    md: 'text-sm px-2.5 py-1',
-    lg: 'text-base px-3 py-1.5',
-  };
-  
-  const iconSizes = {
-    sm: 'h-3 w-3',
-    md: 'h-4 w-4',
-    lg: 'h-5 w-5',
-  };
   
   return (
     <div className="flex items-center gap-2">

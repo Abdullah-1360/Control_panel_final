@@ -155,10 +155,12 @@ export interface ApiResponse<T> {
 
 // Tech Stack Metadata
 export interface TechStackInfo {
+  name?: string; // Optional name property for compatibility
   value: TechStack;
   label: string;
   icon: string; // Lucide icon name
   color: string; // Tailwind color class
   isAvailable: boolean;
+  available?: boolean; // Alias for isAvailable (deprecated, use isAvailable)
   comingSoon?: boolean;
 }

@@ -302,7 +302,9 @@ interface UserMenuProps {
   user: {
     email: string
     username: string
-    role: {
+    role?: {
+      id: string
+      name: string
       displayName: string
     }
   } | null

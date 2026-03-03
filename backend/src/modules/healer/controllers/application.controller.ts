@@ -190,7 +190,28 @@ export class ApplicationController {
     @Param('id') id: string,
     @Body() diagnoseDto: DiagnoseApplicationDto,
   ) {
-    return this.applicationService.diagnose(id, diagnoseDto.subdomain);
+    try {
+      console.log(`[ApplicationController] Starting diagnosis for application ${id}`);
+      console.log(`[ApplicationController] diagnoseDto:`, JSON.stringify(diagnoseDto, null, 2));
+      console.log(`[ApplicationController] subdomain:`, diagnoseDto.subdomain);
+      const result = await this.applicationService.diagnose(id, diagnoseDto.subdomain);
+      console.log('[ApplicationController] Diagnosis complete, result:', JSON.stringify(result, null, 2));
+      console.log('[ApplicationController] diagnosisId:', result.diagnosisId);
+      return result;
+    } catch (error) {
+      console.error('[ApplicationController] Diagnosis error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get diagnosis progress by diagnosisId
+   */
+  @Get('diagnosis/:diagnosisId/progress')
+  @RequirePermissions('healer', 'read')
+  async getDiagnosisProgress(@Param('diagnosisId') diagnosisId: string) {
+    const progress = await this.applicationService.getDiagnosisProgress(diagnosisId);
+    return { data: progress || null };
   }
 
   /**

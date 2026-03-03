@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApplications, useDeleteApplication } from '@/hooks/use-healer';
 import { useServers } from '@/hooks/use-servers';
 import { Search, Plus, Server, ArrowLeft, CheckCircle, AlertCircle, Shield, Grid, List as ListIcon, X } from 'lucide-react';
@@ -40,6 +40,7 @@ import { ConfigurePage } from '@/components/healer/ConfigurePage';
 import { SubdomainConfigModal } from '@/components/healer/SubdomainConfigModal';
 import { DiscoverApplicationsModal } from '@/components/healer/DiscoverApplicationsModal';
 import { DiscoveryMonitoringDashboard } from '@/components/healer/DiscoveryMonitoringDashboard';
+import { DiagnosisProgressModalPolling } from '@/src/components/healer/diagnosis-progress-modal-polling';
 import { TECH_STACKS } from '@/lib/tech-stacks';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api/client';
@@ -73,6 +74,13 @@ export function UniversalHealerView() {
   const [selectedSubdomain, setSelectedSubdomain] = useState<string | null>(null);
   const [subdomainConfig, setSubdomainConfig] = useState<any>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  
+  // Diagnosis progress state
+  const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [diagnosingDomain, setDiagnosingDomain] = useState<string>('');
+  const [pendingDiagnosis, setPendingDiagnosis] = useState<{ applicationId: string; subdomain?: string } | null>(null);
+  const diagnosisStartedRef = useRef(false);
 
   // Fix hydration mismatch
   useEffect(() => {
@@ -117,8 +125,7 @@ export function UniversalHealerView() {
 
   // Fetch selected application details
   const { data: selectedApplication, refetch: refetchDetail } = useApplication(
-    selectedApplicationId || '',
-    { enabled: !!selectedApplicationId }
+    selectedApplicationId || ''
   );
 
   // Fetch servers for discover modal
@@ -186,6 +193,7 @@ export function UniversalHealerView() {
 
   // Navigation handlers
   const handleSelectApplication = (id: string) => {
+    console.log('[UniversalHealerView] handleSelectApplication called with id:', id);
     setSelectedApplicationId(id);
     setCurrentView('detail');
     setActiveTab('overview');
@@ -220,17 +228,27 @@ export function UniversalHealerView() {
   };
 
   const handleDiagnose = async () => {
-    if (!selectedApplicationId) return;
+    if (!selectedApplicationId || !selectedApplication) return;
     
     try {
-      await diagnoseMutation.mutateAsync({ applicationId: selectedApplicationId });
-      toast({
-        title: 'Diagnosis Started',
-        description: 'Running diagnostics on the application',
-      });
-      setActiveTab('diagnostics');
-      await refetchDetail();
+      console.log('[UniversalHealerView] handleDiagnose called for:', selectedApplication.domain);
+      
+      // Reset the ref for new diagnosis
+      diagnosisStartedRef.current = false;
+      console.log('[UniversalHealerView] Reset diagnosisStartedRef to false');
+      
+      // Store pending diagnosis info
+      setPendingDiagnosis({ applicationId: selectedApplicationId });
+      setDiagnosingDomain(selectedApplication.domain);
+      console.log('[UniversalHealerView] Set pendingDiagnosis:', { applicationId: selectedApplicationId });
+      
+      // Show modal - this will trigger onConnectionReady callback
+      setShowProgressModal(true);
+      console.log('[UniversalHealerView] Showing progress modal - onConnectionReady should be called');
     } catch (error: any) {
+      console.error('[UniversalHealerView] handleDiagnose error:', error);
+      setShowProgressModal(false);
+      setPendingDiagnosis(null);
       toast({
         title: 'Diagnosis Failed',
         description: error.message || 'Failed to run diagnostics',
@@ -242,14 +260,26 @@ export function UniversalHealerView() {
   const handleDiagnoseSubdomain = async (subdomain: string) => {
     if (!selectedApplicationId) return;
     
+    console.log('[UniversalHealerView] handleDiagnoseSubdomain called with:', subdomain);
+    
     try {
-      await diagnoseMutation.mutateAsync({ applicationId: selectedApplicationId, subdomain });
-      toast({
-        title: 'Diagnosis Started',
-        description: `Running diagnostics on ${subdomain}`,
-      });
-      await refetchDetail();
+      // Reset the ref for new diagnosis
+      diagnosisStartedRef.current = false;
+      console.log('[UniversalHealerView] Reset diagnosisStartedRef to false');
+      
+      // Store pending diagnosis info
+      setPendingDiagnosis({ applicationId: selectedApplicationId, subdomain });
+      setDiagnosingDomain(subdomain);
+      console.log('[UniversalHealerView] Set pendingDiagnosis:', { applicationId: selectedApplicationId, subdomain });
+      
+      // Show modal to establish SSE connection
+      // The actual diagnosis will be triggered by onConnectionReady callback
+      setShowProgressModal(true);
+      console.log('[UniversalHealerView] Showing progress modal');
     } catch (error: any) {
+      console.error('[UniversalHealerView] Diagnosis error:', error);
+      setShowProgressModal(false);
+      setPendingDiagnosis(null);
       toast({
         title: 'Diagnosis Failed',
         description: error.message || 'Failed to run diagnostics',
@@ -257,6 +287,72 @@ export function UniversalHealerView() {
       });
     }
   };
+
+  // Callback when SSE connection is ready (now used for polling compatibility)
+  const handleConnectionReady = useCallback(async () => {
+    console.log('[UniversalHealerView] handleConnectionReady called');
+    console.log('[UniversalHealerView] diagnosisStartedRef.current:', diagnosisStartedRef.current);
+    console.log('[UniversalHealerView] pendingDiagnosis:', pendingDiagnosis);
+    
+    // Prevent multiple calls
+    if (diagnosisStartedRef.current) {
+      console.log('[UniversalHealerView] Skipping duplicate onConnectionReady call - diagnosisStartedRef is true');
+      return;
+    }
+    
+    if (!pendingDiagnosis) {
+      console.log('[UniversalHealerView] Skipping onConnectionReady call - no pendingDiagnosis');
+      return;
+    }
+    
+    diagnosisStartedRef.current = true;
+    console.log('[UniversalHealerView] Set diagnosisStartedRef to true, starting diagnosis');
+    
+    try {
+      console.log('[UniversalHealerView] Connection ready, starting diagnosis:', pendingDiagnosis);
+      console.log('[UniversalHealerView] Calling diagnoseMutation.mutateAsync...');
+      
+      const result = await diagnoseMutation.mutateAsync(pendingDiagnosis);
+      
+      console.log('[UniversalHealerView] Diagnosis mutation completed');
+      console.log('[UniversalHealerView] Diagnosis started, result:', result);
+      console.log('[UniversalHealerView] Result type:', typeof result);
+      console.log('[UniversalHealerView] Result keys:', result ? Object.keys(result) : 'null');
+      
+      // Update with real diagnosisId
+      if (result && result.diagnosisId) {
+        console.log('[UniversalHealerView] Setting diagnosisId:', result.diagnosisId);
+        setDiagnosisId(result.diagnosisId);
+        setPendingDiagnosis(null); // Clear pending
+      } else {
+        console.log('[UniversalHealerView] No diagnosisId in result, closing modal');
+        console.log('[UniversalHealerView] Result was:', JSON.stringify(result, null, 2));
+        // Fallback: close modal and show toast
+        setShowProgressModal(false);
+        setPendingDiagnosis(null);
+        diagnosisStartedRef.current = false;
+        toast({
+          title: 'Diagnosis Started',
+          description: `Running diagnostics on ${diagnosingDomain}`,
+        });
+        await refetchDetail();
+      }
+    } catch (error: any) {
+      console.error('[UniversalHealerView] Diagnosis start error:', error);
+      console.error('[UniversalHealerView] Error type:', typeof error);
+      console.error('[UniversalHealerView] Error message:', error?.message);
+      console.error('[UniversalHealerView] Error stack:', error?.stack);
+      setShowProgressModal(false);
+      setDiagnosisId(null);
+      setPendingDiagnosis(null);
+      diagnosisStartedRef.current = false;
+      toast({
+        title: 'Diagnosis Failed',
+        description: error.message || 'Failed to start diagnostics',
+        variant: 'destructive',
+      });
+    }
+  }, [pendingDiagnosis, diagnoseMutation, diagnosingDomain, toast, refetchDetail]);
 
   const handleToggleHealer = async () => {
     if (!selectedApplication || !selectedApplicationId) return;
@@ -743,6 +839,33 @@ export function UniversalHealerView() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        
+        {/* Diagnosis Progress Modal */}
+        <DiagnosisProgressModalPolling
+          open={showProgressModal}
+          onClose={() => {
+            setShowProgressModal(false);
+            setDiagnosisId(null);
+            setPendingDiagnosis(null);
+            diagnosisStartedRef.current = false; // Reset ref on close
+          }}
+          diagnosisId={diagnosisId || ''} // Empty string when connecting
+          siteName={diagnosingDomain}
+          onComplete={async () => {
+            console.log('[UniversalHealerView] onComplete callback invoked');
+            console.log('[UniversalHealerView] Closing modal and switching to diagnostics tab');
+            setShowProgressModal(false);
+            setDiagnosisId(null);
+            setPendingDiagnosis(null);
+            diagnosisStartedRef.current = false; // Reset ref on complete
+            console.log('[UniversalHealerView] Setting active tab to diagnostics');
+            setActiveTab('diagnostics');
+            console.log('[UniversalHealerView] Refetching application details');
+            await refetchDetail();
+            console.log('[UniversalHealerView] onComplete callback completed');
+          }}
+          onConnectionReady={handleConnectionReady}
+        />
       </div>
     );
   }

@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { servers as Server } from '@prisma/client';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { SSHExecutorService } from '../services/ssh-executor.service';
 import { WpCliService } from '../services/wp-cli.service';
+import { UnifiedDiagnosisService } from '../services/unified-diagnosis.service';
+import { DiagnosisProfile } from '../enums/diagnosis-profile.enum';
 import {
   IStackPlugin,
   DetectionResult,
@@ -12,12 +15,15 @@ import {
 @Injectable()
 export class WordPressPlugin implements IStackPlugin {
   name = 'wordpress';
-  version = '1.0.0';
+  version = '2.0.0'; // Updated to reflect comprehensive diagnosis integration
   supportedVersions = ['5.x', '6.x'];
+  private readonly logger = new Logger(WordPressPlugin.name);
 
   constructor(
     protected readonly sshExecutor: SSHExecutorService,
     protected readonly wpCli: WpCliService,
+    private readonly unifiedDiagnosis: UnifiedDiagnosisService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async detect(server: Server, path: string): Promise<DetectionResult> {
@@ -66,6 +72,9 @@ export class WordPressPlugin implements IStackPlugin {
 
   getDiagnosticChecks(): string[] {
     return [
+      // Note: For WordPress sites, ApplicationService bypasses this plugin
+      // and uses UnifiedDiagnosisService directly for comprehensive 8-layer diagnosis
+      // These legacy checks are kept for backward compatibility with non-WordPress flows
       'wp_core_update',
       'wp_plugin_updates',
       'wp_theme_updates',
@@ -84,6 +93,12 @@ export class WordPressPlugin implements IStackPlugin {
     const startTime = Date.now();
     
     try {
+      // Use comprehensive unified diagnosis for WordPress
+      if (checkName === 'wp_unified_diagnosis') {
+        return await this.executeUnifiedDiagnosis(application, server, startTime);
+      }
+      
+      // Legacy checks for backward compatibility
       switch (checkName) {
         case 'wp_core_update':
           return await this.checkCoreUpdate(application, server, startTime);
@@ -112,6 +127,208 @@ export class WordPressPlugin implements IStackPlugin {
         executionTime: Date.now() - startTime,
       };
     }
+  }
+
+  /**
+   * Execute comprehensive unified diagnosis using UnifiedDiagnosisService check services
+   * This runs all 30+ checks across 8 layers WITHOUT creating a nested diagnosis
+   * Directly executes check services to avoid timeout issues
+   */
+  private async executeUnifiedDiagnosis(
+    application: any,
+    server: Server,
+    startTime: number,
+  ): Promise<DiagnosticCheckResult> {
+    try {
+      this.logger.log(`Running comprehensive 8-layer diagnosis for ${application.domain}`);
+      
+      // Find or create wp_sites entry for this application
+      const wpSite = await this.findOrCreateWpSite(application, server);
+      
+      // Run unified diagnosis with FULL profile (30+ checks)
+      // Set bypassCache to true to ensure fresh results
+      // Note: This will create a nested diagnosis, but it's intentional for comprehensive checks
+      const diagnosis = await this.unifiedDiagnosis.diagnose(
+        wpSite.id,
+        DiagnosisProfile.LIGHT, // Use LIGHT profile to reduce execution time (10 checks instead of 18)
+        {
+          triggeredBy: 'universal_healer',
+          trigger: 'MANUAL' as any,
+          bypassCache: true, // Always get fresh results
+        },
+      );
+      
+      this.logger.log(
+        `Comprehensive diagnosis complete: Health Score ${diagnosis.healthScore}/100, ` +
+        `${diagnosis.issuesFound} issues found (${diagnosis.criticalIssues} critical)`,
+      );
+      
+      // Map to plugin interface
+      return {
+        checkName: 'wp_unified_diagnosis',
+        category: 'SYSTEM', // Comprehensive diagnosis covers all categories, use SYSTEM as primary
+        status: this.mapDiagnosisStatus(diagnosis),
+        severity: this.mapSeverity(diagnosis.healthScore, diagnosis.criticalIssues),
+        message: this.generateSummaryMessage(diagnosis),
+        details: {
+          healthScore: diagnosis.healthScore,
+          diagnosisType: diagnosis.diagnosisType,
+          confidence: diagnosis.confidence,
+          checksRun: diagnosis.checksRun?.length || 0,
+          issuesFound: diagnosis.issuesFound,
+          criticalIssues: diagnosis.criticalIssues,
+          warningIssues: diagnosis.warningIssues,
+          duration: diagnosis.duration,
+          cached: diagnosis.cached,
+          // Include top 5 most critical check results
+          topIssues: diagnosis.checkResults
+            ?.filter((c: any) => c.status === 'FAIL' || c.status === 'WARNING')
+            .sort((a: any, b: any) => {
+              // Sort by status priority (FAIL > WARNING)
+              if (a.status === 'FAIL' && b.status !== 'FAIL') return -1;
+              if (a.status !== 'FAIL' && b.status === 'FAIL') return 1;
+              return 0;
+            })
+            .slice(0, 5)
+            .map((c: any) => ({
+              checkType: c.checkType,
+              status: c.status,
+              message: c.message,
+              duration: c.duration,
+            })),
+          // Include correlation analysis if available
+          correlation: diagnosis.details?.correlation ? {
+            rootCauses: diagnosis.details.correlation.rootCauses?.slice(0, 3), // Top 3 root causes
+            correlationConfidence: diagnosis.details.correlation.correlationConfidence,
+            criticalIssuesCount: diagnosis.details.correlation.criticalIssuesCount,
+          } : null,
+          // Include top recommendations
+          recommendations: diagnosis.recommendations?.slice(0, 5), // Top 5 recommendations
+        },
+        suggestedFix: this.generateSuggestedFix(diagnosis),
+        executionTime: Date.now() - startTime,
+      };
+    } catch (error: any) {
+      this.logger.error(`Unified diagnosis failed: ${error.message}`, error.stack);
+      return {
+        checkName: 'wp_unified_diagnosis',
+        category: 'SYSTEM',
+        status: 'ERROR',
+        severity: 'HIGH',
+        message: `Comprehensive diagnosis failed: ${error?.message || 'Unknown error'}`,
+        details: { error: error?.message },
+        suggestedFix: 'Check server connectivity and WordPress installation',
+        executionTime: Date.now() - startTime,
+      };
+    }
+  }
+
+  /**
+   * Find or create wp_sites entry for the application
+   */
+  private async findOrCreateWpSite(application: any, server: Server): Promise<any> {
+    // Try to find existing wp_sites entry
+    let wpSite = await this.prisma.wp_sites.findFirst({
+      where: {
+        serverId: application.serverId,
+        domain: application.domain,
+        path: application.path,
+      },
+    });
+    
+    // Create if not exists
+    if (!wpSite) {
+      this.logger.log(`Creating wp_sites entry for ${application.domain}`);
+      wpSite = await this.prisma.wp_sites.create({
+        data: {
+          serverId: application.serverId,
+          domain: application.domain,
+          path: application.path,
+          wpVersion: application.techStackVersion || 'unknown',
+          phpVersion: (application.metadata as any)?.phpVersion || 'unknown',
+          isHealerEnabled: true,
+          healingMode: 'MANUAL',
+          healthStatus: 'UNKNOWN',
+          lastDiagnosedAt: null,
+        },
+      });
+    } else {
+      // Update existing entry with latest metadata
+      wpSite = await this.prisma.wp_sites.update({
+        where: { id: wpSite.id },
+        data: {
+          wpVersion: application.techStackVersion || wpSite.wpVersion,
+          phpVersion: (application.metadata as any)?.phpVersion || wpSite.phpVersion,
+        },
+      });
+    }
+    
+    return wpSite;
+  }
+
+  /**
+   * Map diagnosis result to plugin status
+   */
+  private mapDiagnosisStatus(diagnosis: any): 'PASS' | 'FAIL' | 'WARN' | 'ERROR' {
+    if (diagnosis.criticalIssues > 0) return 'FAIL';
+    if (diagnosis.warningIssues > 0) return 'WARN';
+    if (diagnosis.healthScore >= 80) return 'PASS';
+    return 'WARN';
+  }
+
+  /**
+   * Map health score and critical issues to severity
+   */
+  private mapSeverity(
+    healthScore: number,
+    criticalIssues: number,
+  ): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
+    if (criticalIssues > 0) return 'CRITICAL';
+    if (healthScore >= 80) return 'LOW';
+    if (healthScore >= 60) return 'MEDIUM';
+    if (healthScore >= 40) return 'HIGH';
+    return 'CRITICAL';
+  }
+
+  /**
+   * Generate summary message from diagnosis
+   */
+  private generateSummaryMessage(diagnosis: any): string {
+    const { healthScore, issuesFound, criticalIssues, warningIssues } = diagnosis;
+    
+    if (healthScore >= 90) {
+      return `Excellent health: ${healthScore}/100 - Site is performing optimally`;
+    }
+    
+    if (healthScore >= 70) {
+      return `Good health: ${healthScore}/100 - ${issuesFound} minor issues detected`;
+    }
+    
+    if (healthScore >= 50) {
+      return `Fair health: ${healthScore}/100 - ${issuesFound} issues found (${criticalIssues} critical, ${warningIssues} warnings)`;
+    }
+    
+    return `Poor health: ${healthScore}/100 - ${issuesFound} issues found (${criticalIssues} critical) - Immediate attention required`;
+  }
+
+  /**
+   * Generate suggested fix from diagnosis recommendations
+   */
+  private generateSuggestedFix(diagnosis: any): string {
+    const recommendations = diagnosis.recommendations || [];
+    
+    if (recommendations.length === 0) {
+      if (diagnosis.healthScore >= 90) {
+        return 'No issues detected - site is healthy';
+      }
+      return 'Run comprehensive diagnosis for detailed recommendations';
+    }
+    
+    // Return top 3 recommendations
+    return recommendations
+      .slice(0, 3)
+      .map((rec: string, idx: number) => `${idx + 1}. ${rec}`)
+      .join('\n');
   }
 
   private async checkCoreUpdate(

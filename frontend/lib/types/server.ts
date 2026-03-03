@@ -24,17 +24,17 @@ export interface Server {
   environment: string | null;
   tags: string[];
   notes: string | null;
-  platformType: PlatformType;
+  platformType: PlatformType | string; // Allow string for API compatibility
   host: string;
   port: number;
   connectionProtocol: string;
   username: string;
-  authType: AuthType;
-  privilegeMode: PrivilegeMode;
-  sudoMode: SudoMode;
-  hostKeyStrategy: HostKeyStrategy;
+  authType: AuthType | string; // Allow string for API compatibility
+  privilegeMode: PrivilegeMode | string; // Allow string for API compatibility
+  sudoMode: SudoMode | string; // Allow string for API compatibility
+  hostKeyStrategy: HostKeyStrategy | string; // Allow string for API compatibility
   knownHostFingerprints: HostKeyFingerprint[];
-  lastTestStatus: TestStatus;
+  lastTestStatus: TestStatus | string; // Allow string for API compatibility
   lastTestAt: string | null;
   lastTestResult: ConnectionTestResult | null;
   hasPrivateKey: boolean;
@@ -155,6 +155,11 @@ export interface CreateServerInput {
     keyType: string;
     fingerprint: string;
   }>;
+  metricsEnabled?: boolean;
+  metricsInterval?: number;
+  alertCpuThreshold?: number;
+  alertRamThreshold?: number;
+  alertDiskThreshold?: number;
 }
 
 export interface UpdateServerInput {
@@ -175,6 +180,12 @@ export interface UpdateServerInput {
     keyType: string;
     fingerprint: string;
   }>;
+  connectionProtocol?: string;
+  metricsEnabled?: boolean;
+  metricsInterval?: number;
+  alertCpuThreshold?: number;
+  alertRamThreshold?: number;
+  alertDiskThreshold?: number;
 }
 
 export interface ServerFilters {
@@ -191,6 +202,14 @@ export interface ServerDependencies {
   hasDependencies: boolean;
   dependencies: {
     sites: {
+      count: number;
+      items: any[];
+    };
+    applications: {
+      count: number;
+      items: any[];
+    };
+    integrations: {
       count: number;
       items: any[];
     };

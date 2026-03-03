@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { TechStack, DetectionMethod, HealingMode, HealthStatus } from '@prisma/client';
 import { TechStackDetectorService } from './tech-stack-detector.service';
@@ -6,6 +6,9 @@ import { PluginRegistryService } from './plugin-registry.service';
 import { SSHExecutorService } from './ssh-executor.service';
 import { CircuitBreakerService } from './circuit-breaker.service';
 import { BackupRollbackService } from './backup-rollback.service';
+import { DiagnosisProgressService } from './diagnosis-progress.service';
+import { UnifiedDiagnosisService } from './unified-diagnosis.service';
+import { DiagnosisProfile } from '../enums/diagnosis-profile.enum';
 
 @Injectable()
 export class ApplicationService {
@@ -18,6 +21,9 @@ export class ApplicationService {
     private readonly sshExecutor: SSHExecutorService,
     private readonly circuitBreaker: CircuitBreakerService,
     private readonly backupRollback: BackupRollbackService,
+    private readonly diagnosisProgress: DiagnosisProgressService,
+    @Inject(forwardRef(() => UnifiedDiagnosisService))
+    private readonly unifiedDiagnosis: UnifiedDiagnosisService,
   ) {}
 
   /**
@@ -854,11 +860,49 @@ export class ApplicationService {
    * Diagnose application using tech stack plugin
    * OPTIMIZED: Collects metadata before running diagnostics (Strategy 3 - Two-Phase Discovery)
    * Supports subdomain/addon diagnosis by using subdomain's path
+   * WORDPRESS-AWARE: Uses 8-layer UnifiedDiagnosisService for WordPress sites
    */
   async diagnose(applicationId: string, subdomain?: string) {
-    this.logger.log(`Diagnosing application ${applicationId}${subdomain ? ` (subdomain: ${subdomain})` : ''}`);
+    const diagnosisId = require('uuid').v4(); // Generate diagnosis ID
+    this.logger.log(`Diagnosing application ${applicationId}${subdomain ? ` (subdomain: ${subdomain})` : ''} [ID: ${diagnosisId}]`);
 
     const application = await this.findOne(applicationId);
+    
+    // Return immediately with diagnosisId, run diagnosis in background
+    // This prevents the API call from hanging while diagnosis runs
+    this.logger.log(`[diagnose] Scheduling background diagnosis for ${diagnosisId}`);
+    setImmediate(async () => {
+      this.logger.log(`[diagnose] Background diagnosis starting for ${diagnosisId}`);
+      try {
+        await this.runDiagnosisInBackground(diagnosisId, application, subdomain);
+        this.logger.log(`[diagnose] Background diagnosis completed for ${diagnosisId}`);
+      } catch (error: any) {
+        this.logger.error(`[diagnose] Background diagnosis failed for ${diagnosisId}: ${(error as Error)?.message || 'Unknown error'}`);
+        this.logger.error(`[diagnose] Error stack: ${(error as Error)?.stack}`);
+        this.diagnosisProgress.failDiagnosis(diagnosisId, (error as Error)?.message || 'Diagnosis failed');
+      }
+    });
+    
+    this.logger.log(`[diagnose] Returning immediately with diagnosisId: ${diagnosisId}`);
+    
+    // Return immediately so frontend doesn't hang
+    return {
+      diagnosisId,
+      applicationId: application.id,
+      subdomain: subdomain || null,
+      techStack: application.techStack,
+      message: 'Diagnosis started, progress will be sent via SSE',
+    };
+  }
+  
+  /**
+   * Run diagnosis in background (non-blocking)
+   */
+  /**
+   * Run diagnosis in background (non-blocking)
+   */
+  private async runDiagnosisInBackground(diagnosisId: string, application: any, subdomain?: string) {
+    const applicationId = application.id;
     
     // Handle subdomain diagnosis
     let diagnosisPath = application.path;
@@ -867,12 +911,21 @@ export class ApplicationService {
     if (subdomain) {
       // Find the subdomain in availableSubdomains
       const subdomains = (application.metadata as any)?.availableSubdomains || [];
+      this.logger.log(`Available subdomains in metadata: ${JSON.stringify(subdomains.map((s: any) => ({ domain: s.domain, techStack: s.techStack })))}`);
+      
       const subdomainInfo = subdomains.find((s: any) => s.domain === subdomain);
       
       if (subdomainInfo) {
         diagnosisPath = subdomainInfo.path;
         diagnosisDomain = subdomain;
-        this.logger.log(`Using subdomain path: ${diagnosisPath}`);
+        this.logger.log(`Found subdomain info: ${JSON.stringify({ domain: subdomainInfo.domain, path: subdomainInfo.path, techStack: subdomainInfo.techStack })}`);
+        
+        // Use subdomain's tech stack if available, otherwise inherit from main application
+        if (subdomainInfo.techStack && subdomainInfo.techStack !== TechStack.UNKNOWN) {
+          this.logger.log(`Subdomain has tech stack: ${subdomainInfo.techStack}`);
+        } else {
+          this.logger.log(`Subdomain tech stack is ${subdomainInfo.techStack || 'undefined'}, will use main application's tech stack`);
+        }
       } else {
         throw new NotFoundException(`Subdomain ${subdomain} not found for application ${applicationId}`);
       }
@@ -885,6 +938,30 @@ export class ApplicationService {
       domain: diagnosisDomain,
     };
     
+    this.logger.log(`Initial diagnosisApp tech stack: ${diagnosisApp.techStack}`);
+    
+    // If diagnosing a subdomain, use subdomain's tech stack if available
+    if (subdomain) {
+      const subdomains = (application.metadata as any)?.availableSubdomains || [];
+      const subdomainInfo = subdomains.find((s: any) => s.domain === subdomain);
+      if (subdomainInfo?.techStack) {
+        const subdomainTechStack = subdomainInfo.techStack;
+        this.logger.log(`Subdomain tech stack value: "${subdomainTechStack}" (type: ${typeof subdomainTechStack})`);
+        this.logger.log(`Comparing with TechStack.UNKNOWN: "${TechStack.UNKNOWN}"`);
+        this.logger.log(`Are they equal? ${subdomainTechStack === TechStack.UNKNOWN}`);
+        
+        if (subdomainTechStack !== TechStack.UNKNOWN && subdomainTechStack !== 'UNKNOWN') {
+          diagnosisApp.techStack = subdomainTechStack;
+          diagnosisApp.techStackVersion = subdomainInfo.version;
+          this.logger.log(`✓ Updated diagnosisApp tech stack to subdomain's: ${subdomainTechStack}`);
+        } else {
+          this.logger.log(`✗ Subdomain tech stack is UNKNOWN, keeping main app tech stack: ${diagnosisApp.techStack}`);
+        }
+      } else {
+        this.logger.log(`✗ Subdomain has no techStack property, keeping main app tech stack: ${diagnosisApp.techStack}`);
+      }
+    }
+    
     // Collect detailed metadata if not already collected
     // This ensures we have version info before running diagnostics
     if (!application.techStackVersion || !application.metadata) {
@@ -894,7 +971,18 @@ export class ApplicationService {
         // Refresh application data after metadata collection
         const updatedApp = await this.findOne(applicationId);
         Object.assign(application, updatedApp);
+        
+        // Preserve subdomain-specific properties when updating diagnosisApp
+        const preservedTechStack = diagnosisApp.techStack;
+        const preservedVersion = diagnosisApp.techStackVersion;
         Object.assign(diagnosisApp, { ...updatedApp, path: diagnosisPath, domain: diagnosisDomain });
+        
+        // Restore subdomain's tech stack if it was set
+        if (subdomain && preservedTechStack !== TechStack.UNKNOWN) {
+          diagnosisApp.techStack = preservedTechStack;
+          diagnosisApp.techStackVersion = preservedVersion;
+          this.logger.log(`Restored subdomain tech stack after metadata refresh: ${preservedTechStack}`);
+        }
       } catch (error) {
         this.logger.warn(`Failed to collect metadata, continuing with diagnosis: ${error}`);
       }
@@ -917,6 +1005,12 @@ export class ApplicationService {
       throw new NotFoundException(`Server ${diagnosisApp.serverId} not found`);
     }
 
+    // WORDPRESS-SPECIFIC: Use comprehensive 8-layer diagnosis for WordPress sites
+    if (diagnosisApp.techStack === TechStack.WORDPRESS) {
+      return await this.diagnoseWordPress(diagnosisId, application, diagnosisApp, server, subdomain);
+    }
+
+    // For other tech stacks, use plugin-based diagnosis
     const plugin = this.pluginRegistry.getPlugin(diagnosisApp.techStack);
     if (!plugin) {
       throw new NotFoundException(
@@ -928,12 +1022,42 @@ export class ApplicationService {
 
     // Get all diagnostic checks for this tech stack
     const checkNames = plugin.getDiagnosticChecks();
+    
+    // Start progress tracking
+    this.diagnosisProgress.startDiagnosis(
+      diagnosisId,
+      applicationId,
+      diagnosisDomain,
+      checkNames.length,
+    );
+    this.diagnosisProgress.setRunning(diagnosisId);
+    
     const results: any[] = [];
 
-    // Execute each check
+    // Execute each check with progress tracking
     for (const checkName of checkNames) {
+      // Notify check started
+      this.diagnosisProgress.checkStarted(
+        diagnosisId,
+        checkName,
+        checkName,
+        'SYSTEM', // Default category
+      );
+      
+      const startTime = Date.now();
+      
       try {
         const result = await plugin.executeDiagnosticCheck(checkName, diagnosisApp, server);
+        const duration = Date.now() - startTime;
+        
+        // Notify check completed
+        this.diagnosisProgress.checkCompleted(
+          diagnosisId,
+          checkName,
+          result.status as any,
+          result.message,
+          duration,
+        );
         
         // Store result in database
         await this.prisma.diagnostic_results.create({
@@ -953,7 +1077,18 @@ export class ApplicationService {
 
         results.push(result);
       } catch (error: any) {
+        const duration = Date.now() - startTime;
         this.logger.error(`Check ${checkName} failed: ${error?.message || 'Unknown error'}`);
+        
+        // Notify check failed
+        this.diagnosisProgress.checkCompleted(
+          diagnosisId,
+          checkName,
+          'ERROR',
+          `Check failed: ${error?.message || 'Unknown error'}`,
+          duration,
+        );
+        
         results.push({
           checkName,
           category: 'SYSTEM',
@@ -974,16 +1109,163 @@ export class ApplicationService {
       await this.calculateHealthScore(applicationId);
       await this.updateHealthStatus(applicationId);
     }
+    
+    // Get final health score
+    const updatedApp = await this.findOne(applicationId);
+    const healthScore = updatedApp.healthScore || 0;
+    
+    // Complete progress tracking
+    this.diagnosisProgress.completeDiagnosis(diagnosisId, healthScore);
 
-    this.logger.log(`Diagnosis complete: ${results.length} checks executed`);
+    this.logger.log(`Diagnosis complete: ${results.length} checks executed [ID: ${diagnosisId}]`);
 
     return {
+      diagnosisId, // Include diagnosis ID for frontend tracking
       applicationId,
       subdomain: subdomain || null,
       techStack: application.techStack,
       checksExecuted: results.length,
       results,
     };
+  }
+
+  /**
+   * WordPress-specific diagnosis using comprehensive 8-layer UnifiedDiagnosisService
+   * Bypasses plugin system to use production-ready WordPress healer
+   */
+  private async diagnoseWordPress(
+    diagnosisId: string,
+    application: any,
+    diagnosisApp: any,
+    server: any,
+    subdomain?: string,
+  ) {
+    this.logger.log(`Using WordPress-specific 8-layer diagnosis for ${diagnosisApp.domain}`);
+    
+    // Find or create wp_sites entry
+    let wpSite = await this.prisma.wp_sites.findFirst({
+      where: {
+        serverId: application.serverId,
+        domain: diagnosisApp.domain,
+        path: diagnosisApp.path,
+      },
+    });
+    
+    if (!wpSite) {
+      this.logger.log(`Creating wp_sites entry for ${diagnosisApp.domain}`);
+      wpSite = await this.prisma.wp_sites.create({
+        data: {
+          serverId: application.serverId,
+          domain: diagnosisApp.domain,
+          path: diagnosisApp.path,
+          wpVersion: application.techStackVersion || 'unknown',
+          phpVersion: (application.metadata as any)?.phpVersion || 'unknown',
+          isHealerEnabled: true,
+          healingMode: 'MANUAL',
+          healthStatus: 'UNKNOWN',
+          lastDiagnosedAt: null,
+        },
+      });
+    }
+    
+    // Run comprehensive 8-layer diagnosis with FULL profile
+    // FULL profile includes all 18 checks across 8 layers:
+    // Layer 1: HTTP_STATUS, MAINTENANCE_MODE
+    // Layer 2: CORE_INTEGRITY, SECURITY_AUDIT
+    // Layer 3: WP_VERSION, DATABASE_CONNECTION
+    // Layer 4: DATABASE_HEALTH
+    // Layer 5: PERFORMANCE_METRICS, RESOURCE_MONITORING, UPTIME_MONITORING
+    // Layer 6: PLUGIN_STATUS, THEME_STATUS, PLUGIN_THEME_ANALYSIS, UPDATE_STATUS
+    // Layer 7: ERROR_LOG_ANALYSIS
+    // Layer 8: MALWARE_DETECTION, SEO_HEALTH, BACKUP_STATUS
+    const diagnosis = await this.unifiedDiagnosis.diagnose(
+      wpSite.id,
+      DiagnosisProfile.FULL,
+      {
+        diagnosisId: diagnosisId, // Pass diagnosisId for progress tracking
+        subdomain: subdomain,
+        bypassCache: true,
+        triggeredBy: 'universal_healer',
+        trigger: 'MANUAL' as any,
+      },
+    );
+    
+    this.logger.log(
+      `WordPress diagnosis complete: Health Score ${diagnosis.healthScore}/100, ` +
+      `${diagnosis.issuesFound} issues found (${diagnosis.criticalIssues} critical)`,
+    );
+    
+    // Map UnifiedDiagnosisService results to ApplicationService format
+    const results = diagnosis.checkResults?.map((check: any) => ({
+      checkName: check.checkType,
+      category: check.category || 'SYSTEM',
+      status: check.status,
+      severity: check.severity || 'MEDIUM',
+      message: check.message,
+      details: check.details || {},
+      suggestedFix: check.suggestedFix || '',
+      executionTime: check.duration || 0,
+    })) || [];
+    
+    // Store results in diagnostic_results table for ApplicationService compatibility
+    for (const result of results) {
+      // Map WARNING to WARN for Prisma enum compatibility
+      const prismaStatus = result.status === 'WARNING' ? 'WARN' : result.status;
+      
+      await this.prisma.diagnostic_results.create({
+        data: {
+          applicationId: application.id,
+          subdomain: subdomain || null,
+          checkName: result.checkName,
+          checkCategory: result.category as any,
+          status: prismaStatus as any,
+          severity: result.severity as any,
+          message: result.message,
+          details: result.details || {},
+          suggestedFix: result.suggestedFix,
+          executionTime: result.executionTime,
+        },
+      });
+    }
+    
+    // Update application health score
+    await this.prisma.applications.update({
+      where: { id: application.id },
+      data: {
+        healthScore: diagnosis.healthScore,
+        healthStatus: this.mapHealthStatus(diagnosis.healthScore),
+      },
+    });
+    
+    return {
+      diagnosisId: diagnosis.diagnosisId || diagnosisId,
+      applicationId: application.id,
+      subdomain: subdomain || null,
+      techStack: application.techStack,
+      checksExecuted: results.length,
+      results,
+      // Include WordPress-specific diagnosis details
+      wordpressDetails: {
+        healthScore: diagnosis.healthScore,
+        diagnosisType: diagnosis.diagnosisType,
+        confidence: diagnosis.confidence,
+        issuesFound: diagnosis.issuesFound,
+        criticalIssues: diagnosis.criticalIssues,
+        warningIssues: diagnosis.warningIssues,
+        recommendations: diagnosis.recommendations,
+        correlation: diagnosis.details?.correlation,
+      },
+    };
+  }
+  
+  /**
+   * Map health score to health status
+   */
+  private mapHealthStatus(healthScore: number): HealthStatus {
+    if (healthScore >= 90) return HealthStatus.HEALTHY;
+    if (healthScore >= 70) return HealthStatus.DEGRADED; // Changed from WARNING
+    if (healthScore >= 50) return HealthStatus.DEGRADED;
+    return HealthStatus.DOWN; // Changed from CRITICAL
   }
 
   /**
@@ -997,6 +1279,13 @@ export class ApplicationService {
     });
 
     return results;
+  }
+
+  /**
+   * Get diagnosis progress by diagnosisId
+   */
+  async getDiagnosisProgress(diagnosisId: string) {
+    return this.diagnosisProgress.getProgress(diagnosisId);
   }
 
   /**

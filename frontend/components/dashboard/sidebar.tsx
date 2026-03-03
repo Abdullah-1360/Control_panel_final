@@ -47,6 +47,7 @@ export type View =
   | "monitoring"
   | "integrations"
   | "healer"
+  | "team"
   | "users"
   | "audit"
   | "sessions"
