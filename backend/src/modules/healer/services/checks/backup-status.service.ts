@@ -34,18 +34,18 @@ export class BackupStatusService implements IDiagnosisCheckService {
       const lastBackup = await this.checkLastBackup(serverId, sitePath);
       if (!lastBackup.exists) {
         issues.push('No backups found');
-        score -= 40;
+        score -= 30; // Reduced from 40 to keep it in WARNING range
         recommendations.push('Create initial backup');
         recommendations.push('Setup automated backup schedule');
       } else {
         const daysSinceBackup = lastBackup.daysSince;
         if (daysSinceBackup > 7) {
           issues.push(`Last backup was ${daysSinceBackup} days ago`);
-          score -= 30;
+          score -= 25; // Reduced from 30
           recommendations.push('Create fresh backup');
         } else if (daysSinceBackup > 3) {
           issues.push(`Last backup was ${daysSinceBackup} days ago`);
-          score -= 15;
+          score -= 10; // Reduced from 15
           recommendations.push('Consider more frequent backups');
         }
       }
@@ -54,7 +54,7 @@ export class BackupStatusService implements IDiagnosisCheckService {
       const backupPlugins = await this.checkBackupPlugins(serverId, sitePath);
       if (backupPlugins.length === 0) {
         issues.push('No backup plugin installed');
-        score -= 20;
+        score -= 15; // Reduced from 20
         recommendations.push('Install backup plugin (UpdraftPlus, BackupBuddy, etc.)');
       }
 
@@ -62,7 +62,7 @@ export class BackupStatusService implements IDiagnosisCheckService {
       const backupDir = await this.checkBackupDirectory(serverId, sitePath);
       if (backupDir.exists && backupDir.sizeMB > 5000) {
         issues.push(`Large backup directory: ${backupDir.sizeMB}MB`);
-        score -= 10;
+        score -= 5; // Reduced from 10
         recommendations.push('Clean up old backups');
         recommendations.push('Consider offsite backup storage');
       }
@@ -71,11 +71,12 @@ export class BackupStatusService implements IDiagnosisCheckService {
       const schedule = await this.checkBackupSchedule(serverId, sitePath);
       if (!schedule.hasSchedule) {
         issues.push('No automated backup schedule');
-        score -= 15;
+        score -= 10; // Reduced from 15
         recommendations.push('Setup automated daily/weekly backups');
       }
 
-      const status = score >= 80 ? CheckStatus.PASS : score >= 60 ? CheckStatus.WARNING : CheckStatus.FAIL;
+      // Adjusted thresholds: no backups should be WARNING, not FAIL
+      const status = score >= 70 ? CheckStatus.PASS : score >= 40 ? CheckStatus.WARNING : CheckStatus.FAIL;
       const message = issues.length === 0 ? 'Backup status is good' : `Backup issues: ${issues.join(', ')}`;
 
       return {

@@ -25,7 +25,6 @@ export function SiteDetailView({ siteId, onBack }: SiteDetailViewProps) {
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [diagnosis, setDiagnosis] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'diagnosis' | 'history'>('diagnosis');
-  const [selectedProfile, setSelectedProfile] = useState<'FULL' | 'LIGHT' | 'QUICK' | 'CUSTOM'>('FULL');
   const [selectedSubdomain, setSelectedSubdomain] = useState<string>('__main__');
 
   // Helper to get auth headers

@@ -3,15 +3,21 @@ import { CheckResult, CheckStatus, IDiagnosisCheckService, CheckPriority } from 
 import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
 import { SSHExecutorService } from '../ssh-executor.service';
 import { WpCliService } from '../wp-cli.service';
+import { SecureDatabaseAccess } from '../../utils/secure-database-access';
+import { RetryHandler } from '../../utils/retry-handler';
+import { CircuitBreakerManager } from '../../utils/circuit-breaker';
 
 @Injectable()
 export class OrphanedTransientsDetectionService implements IDiagnosisCheckService {
   private readonly logger = new Logger(OrphanedTransientsDetectionService.name);
+  private readonly secureDatabaseAccess: SecureDatabaseAccess;
 
   constructor(
     private readonly sshExecutor: SSHExecutorService,
     private readonly wpCli: WpCliService
-  ) {}
+  ) {
+    this.secureDatabaseAccess = new SecureDatabaseAccess(sshExecutor);
+  }
 
   async check(serverId: string, sitePath: string, domain: string, config?: any): Promise<CheckResult> {
     const startTime = Date.now();
@@ -25,8 +31,15 @@ export class OrphanedTransientsDetectionService implements IDiagnosisCheckServic
         throw new Error('Unable to retrieve database configuration');
       }
 
-      // Analyze transients in the database
-      const transientAnalysis = await this.analyzeTransients(serverId, dbConfig);
+      // Analyze transients in the database with circuit breaker and retry
+      const transientAnalysis = await CircuitBreakerManager.execute(
+        `transients-${serverId}`,
+        () => RetryHandler.executeWithRetry(
+          () => this.analyzeTransients(serverId, dbConfig),
+          { maxRetries: 2 }
+        ),
+        () => ({ totalTransients: 0, expiredTransients: 0, orphanedTransients: 0, sizeImpact: 0 })
+      );
       
       let status = CheckStatus.PASS;
       let score = 100;
@@ -232,79 +245,45 @@ export class OrphanedTransientsDetectionService implements IDiagnosisCheckServic
 
   private async analyzeTransients(serverId: string, dbConfig: any): Promise<any> {
     try {
-      const now = Math.floor(Date.now() / 1000); // Current Unix timestamp
+      console.log('[OrphanedTransients] Starting transient analysis');
+      console.log('[OrphanedTransients] Database config:', { ...dbConfig, password: '***' });
+      console.log('[OrphanedTransients] Table prefix:', dbConfig.prefix);
       
-      // Count total transients
-      const totalQuery = `SELECT COUNT(*) as count FROM ${dbConfig.prefix}options WHERE option_name LIKE '_transient_%'`;
-      const totalResult = await this.executeQuery(serverId, dbConfig, totalQuery);
-      const totalTransients = totalResult ? parseInt(totalResult.count) : 0;
+      // Use SecureDatabaseAccess to count transients
+      const transientCounts = await this.secureDatabaseAccess.countTransients(
+        serverId,
+        dbConfig,
+        dbConfig.prefix
+      );
+      
+      console.log('[OrphanedTransients] Transient counts:', transientCounts);
 
-      // Count expired transients
-      const expiredQuery = `
-        SELECT COUNT(*) as count 
-        FROM ${dbConfig.prefix}options o1 
-        JOIN ${dbConfig.prefix}options o2 ON o2.option_name = CONCAT('_transient_timeout_', SUBSTRING(o1.option_name, 12))
-        WHERE o1.option_name LIKE '_transient_%' 
-        AND o1.option_name NOT LIKE '_transient_timeout_%'
-        AND CAST(o2.option_value AS UNSIGNED) < ${now}
-      `;
-      const expiredResult = await this.executeQuery(serverId, dbConfig, expiredQuery);
-      const expiredTransients = expiredResult ? parseInt(expiredResult.count) : 0;
-
-      // Count orphaned transients (transients without timeout entries)
-      const orphanedQuery = `
-        SELECT COUNT(*) as count 
-        FROM ${dbConfig.prefix}options o1 
-        LEFT JOIN ${dbConfig.prefix}options o2 ON o2.option_name = CONCAT('_transient_timeout_', SUBSTRING(o1.option_name, 12))
-        WHERE o1.option_name LIKE '_transient_%' 
-        AND o1.option_name NOT LIKE '_transient_timeout_%'
-        AND o2.option_name IS NULL
-      `;
-      const orphanedResult = await this.executeQuery(serverId, dbConfig, orphanedQuery);
-      const orphanedTransients = orphanedResult ? parseInt(orphanedResult.count) : 0;
-
-      // Calculate size impact
+      // Calculate size impact using secure query
       const sizeQuery = `
         SELECT SUM(LENGTH(option_value)) as total_size 
         FROM ${dbConfig.prefix}options 
         WHERE option_name LIKE '_transient_%'
       `;
-      const sizeResult = await this.executeQuery(serverId, dbConfig, sizeQuery);
-      const sizeImpact = sizeResult ? (parseInt(sizeResult.total_size) / 1024 / 1024) : 0; // Convert to MB
+      console.log('[OrphanedTransients] Calculating size impact');
+      const sizeResult = await this.secureDatabaseAccess.executeQueryJSON(serverId, dbConfig, sizeQuery);
+      console.log('[OrphanedTransients] Size result:', sizeResult);
+      
+      const sizeImpact = sizeResult.length > 0 && sizeResult[0][0] 
+        ? (parseInt(sizeResult[0][0]) / 1024 / 1024) 
+        : 0; // Convert to MB
+
+      console.log('[OrphanedTransients] Analysis complete. Size impact:', sizeImpact, 'MB');
 
       return {
-        totalTransients,
-        expiredTransients,
-        orphanedTransients,
+        totalTransients: transientCounts.total,
+        expiredTransients: transientCounts.expired,
+        orphanedTransients: transientCounts.orphaned,
         sizeImpact
       };
     } catch (error) {
       this.logger.error('Failed to analyze transients:', error);
+      console.error('[OrphanedTransients] Fatal error:', error);
       throw error;
-    }
-  }
-
-  private async executeQuery(serverId: string, dbConfig: any, query: string): Promise<any> {
-    try {
-      const command = `mysql -h "${dbConfig.host}" -u "${dbConfig.user}" -p"${dbConfig.password}" "${dbConfig.name}" -e "${query}" -s --skip-column-names`;
-      const result = await this.sshExecutor.executeCommandDetailed(serverId, command);
-      
-      if (result.success && result.output) {
-        const lines = result.output.trim().split('\n');
-        const values = lines[0].split('\t');
-        
-        // Return as object with column names
-        if (query.includes('COUNT(*)')) {
-          return { count: values[0] };
-        } else if (query.includes('SUM(LENGTH')) {
-          return { total_size: values[0] || '0' };
-        }
-      }
-      
-      return null;
-    } catch (error) {
-      this.logger.error('Failed to execute query:', error);
-      return null;
     }
   }
 }

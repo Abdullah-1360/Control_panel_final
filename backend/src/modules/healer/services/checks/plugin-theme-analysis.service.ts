@@ -54,6 +54,14 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const pluginStatus = await this.checkPluginStatus(serverId, sitePath);
       details.plugins = pluginStatus;
 
+      if (pluginStatus.unhealthy > 0) {
+        score -= pluginStatus.unhealthy * 20;
+        status = CheckStatus.FAIL;
+        recommendations.push(
+          `CRITICAL: ${pluginStatus.unhealthy} plugin(s) causing errors - check error_log`,
+        );
+      }
+
       if (pluginStatus.inactive > 0) {
         score -= Math.min(pluginStatus.inactive * 2, 10);
         recommendations.push(
@@ -85,6 +93,14 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       // Check theme status
       const themeStatus = await this.checkThemeStatus(serverId, sitePath);
       details.themes = themeStatus;
+
+      if (themeStatus.unhealthy > 0) {
+        score -= themeStatus.unhealthy * 20;
+        status = CheckStatus.FAIL;
+        recommendations.push(
+          `CRITICAL: ${themeStatus.unhealthy} theme(s) causing errors - check error_log`,
+        );
+      }
 
       if (themeStatus.inactive > 0) {
         score -= Math.min(themeStatus.inactive * 3, 10);
@@ -323,24 +339,34 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       );
 
       const plugins = JSON.parse(result);
+      
+      // Get error log analysis to check plugin health
+      const errorLogAnalysis = await this.analyzeErrorLog(serverId, sitePath);
+      const problematicPlugins = new Set(errorLogAnalysis.problematicPlugins);
+      
       const active = plugins.filter((p: any) => p.status === 'active').length;
       const inactive = plugins.filter((p: any) => p.status === 'inactive').length;
+      const unhealthy = plugins.filter((p: any) => 
+        p.status === 'active' && problematicPlugins.has(p.name)
+      ).length;
 
       return {
         total: plugins.length,
         active,
         inactive,
+        unhealthy,
         list: plugins.map((p: any) => ({
           name: p.name,
           status: p.status,
           update: p.update,
           version: p.version,
+          healthy: !problematicPlugins.has(p.name),
         })),
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.warn(`Failed to check plugin status: ${errorMessage}`);
-      return { total: 0, active: 0, inactive: 0, list: [] };
+      return { total: 0, active: 0, inactive: 0, unhealthy: 0, list: [] };
     }
   }
 
@@ -415,24 +441,34 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       );
 
       const themes = JSON.parse(result);
+      
+      // Get error log analysis to check theme health
+      const errorLogAnalysis = await this.analyzeErrorLog(serverId, sitePath);
+      const problematicThemes = new Set(errorLogAnalysis.problematicThemes);
+      
       const active = themes.filter((t: any) => t.status === 'active').length;
       const inactive = themes.filter((t: any) => t.status === 'inactive').length;
+      const unhealthy = themes.filter((t: any) => 
+        t.status === 'active' && problematicThemes.has(t.name)
+      ).length;
 
       return {
         total: themes.length,
         active,
         inactive,
+        unhealthy,
         list: themes.map((t: any) => ({
           name: t.name,
           status: t.status,
           update: t.update,
           version: t.version,
+          healthy: !problematicThemes.has(t.name),
         })),
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.warn(`Failed to check theme status: ${errorMessage}`);
-      return { total: 0, active: 0, inactive: 0, list: [] };
+      return { total: 0, active: 0, inactive: 0, unhealthy: 0, list: [] };
     }
   }
 

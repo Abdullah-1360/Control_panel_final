@@ -288,12 +288,29 @@ export class PerformanceMetricsService implements IDiagnosisCheckService {
       // Get PHP memory limit
       const memoryCommand = `cd ${sitePath} && wp eval "echo ini_get('memory_limit');" --allow-root 2>/dev/null || echo "128M"`;
       const memoryResult = await this.sshExecutor.executeCommand(serverId, memoryCommand, 10000);
-      const memoryLimit = parseInt(memoryResult.replace(/[^0-9]/g, ''));
+      
+      // Parse memory limit properly (handles M, G, K suffixes)
+      let memoryLimit = 128; // Default
+      const memoryStr = memoryResult.trim().toUpperCase();
+      
+      if (memoryStr.includes('G')) {
+        memoryLimit = parseInt(memoryStr.replace(/[^0-9]/g, '')) * 1024;
+      } else if (memoryStr.includes('M')) {
+        memoryLimit = parseInt(memoryStr.replace(/[^0-9]/g, ''));
+      } else if (memoryStr.includes('K')) {
+        memoryLimit = Math.round(parseInt(memoryStr.replace(/[^0-9]/g, '')) / 1024);
+      } else {
+        // Bytes
+        const bytes = parseInt(memoryStr.replace(/[^0-9]/g, ''));
+        if (bytes > 0) {
+          memoryLimit = Math.round(bytes / 1024 / 1024);
+        }
+      }
 
       // Get max execution time
       const timeCommand = `cd ${sitePath} && wp eval "echo ini_get('max_execution_time');" --allow-root 2>/dev/null || echo "30"`;
       const timeResult = await this.sshExecutor.executeCommand(serverId, timeCommand, 10000);
-      const maxExecutionTime = parseInt(timeResult.trim());
+      const maxExecutionTime = parseInt(timeResult.trim()) || 30;
 
       return {
         memoryLimit,
@@ -377,7 +394,34 @@ export class PerformanceMetricsService implements IDiagnosisCheckService {
     try {
       const command = `cd ${sitePath} && wp db size --allow-root 2>/dev/null || echo "0 MB"`;
       const result = await this.sshExecutor.executeCommand(serverId, command, 15000);
-      const sizeMB = parseFloat(result.replace(/[^0-9.]/g, ''));
+      
+      // Parse database size properly
+      // Output format: "Name\tSize\ndatabase_name\t12345678 B"
+      const lines = result.split('\n').filter(line => line.trim() && !line.startsWith('Name'));
+      let sizeMB = 0;
+      
+      if (lines.length > 0) {
+        const parts = lines[0].split(/\s+/);
+        if (parts.length >= 2) {
+          const sizeStr = parts[1];
+          // Parse size with unit (B, KB, MB, GB)
+          if (sizeStr.includes('GB')) {
+            sizeMB = parseFloat(sizeStr.replace(/[^0-9.]/g, '')) * 1024;
+          } else if (sizeStr.includes('MB')) {
+            sizeMB = parseFloat(sizeStr.replace(/[^0-9.]/g, ''));
+          } else if (sizeStr.includes('KB')) {
+            sizeMB = parseFloat(sizeStr.replace(/[^0-9.]/g, '')) / 1024;
+          } else if (sizeStr.includes('B')) {
+            // Bytes
+            sizeMB = parseFloat(sizeStr.replace(/[^0-9.]/g, '')) / 1024 / 1024;
+          } else {
+            // Assume bytes if no unit
+            sizeMB = parseFloat(sizeStr) / 1024 / 1024;
+          }
+        }
+      }
+      
+      sizeMB = Math.round(sizeMB * 100) / 100; // Round to 2 decimal places
 
       return {
         sizeMB,

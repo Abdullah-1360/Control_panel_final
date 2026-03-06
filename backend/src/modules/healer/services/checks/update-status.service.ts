@@ -30,24 +30,20 @@ export class UpdateStatusService implements IDiagnosisCheckService {
     let score = 100;
 
     try {
-      // Check WordPress core updates
-      const coreUpdates = await this.checkCoreUpdates(serverId, sitePath);
-      if (coreUpdates.available) {
-        issues.push(`WordPress ${coreUpdates.current} → ${coreUpdates.latest} available`);
-        score -= coreUpdates.isSecurity ? 25 : 15;
-        recommendations.push('Update WordPress core');
-      }
-
-      // Check plugin updates
+      // Get plugin versions and updates
       const pluginUpdates = await this.checkPluginUpdates(serverId, sitePath);
+      const pluginVersions = await this.getPluginVersions(serverId, sitePath);
+      
       if (pluginUpdates.length > 0) {
         issues.push(`${pluginUpdates.length} plugin updates available`);
         score -= Math.min(20, pluginUpdates.length * 3);
         recommendations.push('Update outdated plugins');
       }
 
-      // Check theme updates
+      // Get theme versions and updates
       const themeUpdates = await this.checkThemeUpdates(serverId, sitePath);
+      const themeVersions = await this.getThemeVersions(serverId, sitePath);
+      
       if (themeUpdates.length > 0) {
         issues.push(`${themeUpdates.length} theme updates available`);
         score -= Math.min(15, themeUpdates.length * 5);
@@ -55,14 +51,20 @@ export class UpdateStatusService implements IDiagnosisCheckService {
       }
 
       const status = score >= 80 ? CheckStatus.PASS : score >= 60 ? CheckStatus.WARNING : CheckStatus.FAIL;
-      const message = issues.length === 0 ? 'All software is up to date' : `Updates available: ${issues.join(', ')}`;
+      const message = issues.length === 0 ? 'All plugins and themes are up to date' : `Updates available: ${issues.join(', ')}`;
 
       return {
         checkType: this.getCheckType(),
         status,
         score: Math.max(0, score),
         message,
-        details: { coreUpdates, pluginUpdates, themeUpdates, issues },
+        details: { 
+          pluginVersions, 
+          themeVersions, 
+          pluginUpdates, 
+          themeUpdates, 
+          issues 
+        },
         recommendations,
         duration: Date.now() - startTime,
         timestamp: new Date(),
@@ -81,18 +83,39 @@ export class UpdateStatusService implements IDiagnosisCheckService {
     }
   }
 
-  private async checkCoreUpdates(serverId: string, sitePath: string): Promise<any> {
+  private async getPluginVersions(serverId: string, sitePath: string): Promise<any[]> {
     try {
-      const result = await this.wpCli.execute(serverId, sitePath, 'core check-update --format=json', 15000);
-      const updates = JSON.parse(result || '[]');
-      return {
-        available: updates.length > 0,
-        current: updates[0]?.version || 'unknown',
-        latest: updates[0]?.version || 'unknown',
-        isSecurity: updates[0]?.package?.includes('security') || false,
-      };
+      const result = await this.wpCli.execute(serverId, sitePath, 'plugin list --status=active --format=json', 15000);
+      const plugins = JSON.parse(result || '[]');
+      return plugins.map((p: any) => ({
+        name: p.name,
+        title: p.title || p.name,
+        version: p.version,
+        status: p.status,
+        updateAvailable: p.update !== 'none',
+        updateVersion: p.update_version || null,
+      }));
     } catch (error) {
-      return { available: false, current: 'unknown', latest: 'unknown', isSecurity: false };
+      this.logger.warn(`Failed to get plugin versions: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  private async getThemeVersions(serverId: string, sitePath: string): Promise<any[]> {
+    try {
+      const result = await this.wpCli.execute(serverId, sitePath, 'theme list --format=json', 15000);
+      const themes = JSON.parse(result || '[]');
+      return themes.map((t: any) => ({
+        name: t.name,
+        title: t.title || t.name,
+        version: t.version,
+        status: t.status,
+        updateAvailable: t.update !== 'none',
+        updateVersion: t.update_version || null,
+      }));
+    } catch (error) {
+      this.logger.warn(`Failed to get theme versions: ${(error as Error).message}`);
+      return [];
     }
   }
 
@@ -127,7 +150,7 @@ export class UpdateStatusService implements IDiagnosisCheckService {
   }
 
   getDescription(): string {
-    return 'Checks for WordPress core, plugin, and theme updates';
+    return 'Displays plugin and theme versions, and checks for available updates';
   }
 
   canHandle(checkType: DiagnosisCheckType): boolean {

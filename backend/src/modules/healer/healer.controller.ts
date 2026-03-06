@@ -451,7 +451,7 @@ export class HealerController {
 
   /**
    * POST /api/v1/healer/sites/:id/diagnose/unified
-   * Unified diagnosis with profile support
+   * Unified diagnosis (always runs FULL profile)
    */
   @Post('sites/:id/diagnose/unified')
   // @Permissions('healer.diagnose') // TODO: Enable when Module 1 is integrated
@@ -461,7 +461,7 @@ export class HealerController {
     @Body() dto: DiagnoseSiteDto,
     // @CurrentUser() user: any, // TODO: Enable when Module 1 is integrated
   ) {
-    const result = await this.unifiedDiagnosis.diagnose(siteId, dto.profile, {
+    const result = await this.unifiedDiagnosis.diagnose(siteId, DiagnosisProfile.FULL, {
       customChecks: dto.customChecks,
       subdomain: dto.subdomain,
       bypassCache: dto.bypassCache,

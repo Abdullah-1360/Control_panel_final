@@ -15,8 +15,32 @@ import {
 export class DiagnosisProgressService {
   private readonly logger = new Logger(DiagnosisProgressService.name);
   private readonly progressMap = new Map<string, DiagnosisProgressSummary>();
+  // Track active diagnoses by siteId to prevent duplicates
+  private readonly activeDiagnoses = new Map<string, string>(); // siteId -> diagnosisId
 
   constructor(private readonly eventBus: EventBusService) {}
+
+  /**
+   * Check if a diagnosis is already running for a site
+   */
+  isRunning(siteId: string): string | null {
+    const diagnosisId = this.activeDiagnoses.get(siteId);
+    if (diagnosisId) {
+      const summary = this.progressMap.get(diagnosisId);
+      // Only return diagnosisId if diagnosis is actually still running
+      if (summary && (summary.status === DiagnosisProgressStatus.STARTING || 
+                      summary.status === DiagnosisProgressStatus.RUNNING ||
+                      summary.status === DiagnosisProgressStatus.CHECK_STARTED ||
+                      summary.status === DiagnosisProgressStatus.CHECK_COMPLETED ||
+                      summary.status === DiagnosisProgressStatus.CORRELATING)) {
+        return diagnosisId;
+      } else {
+        // Clean up stale entry
+        this.activeDiagnoses.delete(siteId);
+      }
+    }
+    return null;
+  }
 
   /**
    * Start tracking diagnosis progress
@@ -27,6 +51,18 @@ export class DiagnosisProgressService {
     siteName: string,
     totalChecks: number,
   ): void {
+    // Check if diagnosis is already running for this site
+    const existingDiagnosisId = this.isRunning(siteId);
+    if (existingDiagnosisId && existingDiagnosisId !== diagnosisId) {
+      this.logger.warn(
+        `Diagnosis already running for site ${siteId} (existing: ${existingDiagnosisId}, new: ${diagnosisId}). Skipping duplicate.`
+      );
+      return;
+    }
+
+    // Mark this site as having an active diagnosis
+    this.activeDiagnoses.set(siteId, diagnosisId);
+
     const summary: DiagnosisProgressSummary = {
       diagnosisId,
       siteId,
@@ -262,6 +298,9 @@ export class DiagnosisProgressService {
     summary.elapsedTime = summary.completedAt.getTime() - summary.startedAt.getTime();
     this.progressMap.set(diagnosisId, summary);
 
+    // Remove from active diagnoses
+    this.activeDiagnoses.delete(summary.siteId);
+
     this.logger.log(`[completeDiagnosis] Updated status to COMPLETED, progress to 100%`);
 
     this.emitProgress({
@@ -300,6 +339,9 @@ export class DiagnosisProgressService {
     summary.completedAt = new Date();
     summary.elapsedTime = summary.completedAt.getTime() - summary.startedAt.getTime();
     this.progressMap.set(diagnosisId, summary);
+
+    // Remove from active diagnoses
+    this.activeDiagnoses.delete(summary.siteId);
 
     this.emitProgress({
       diagnosisId: summary.diagnosisId,

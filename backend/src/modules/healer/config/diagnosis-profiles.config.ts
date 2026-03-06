@@ -23,8 +23,7 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
       DiagnosisCheckType.MAINTENANCE_MODE,
       
       // Layer 2: Core WordPress Integrity
-      DiagnosisCheckType.CORE_INTEGRITY,
-      DiagnosisCheckType.CHECKSUM_VERIFICATION,
+      DiagnosisCheckType.CHECKSUM_VERIFICATION, // Comprehensive core file verification (removed CORE_INTEGRITY duplicate)
       DiagnosisCheckType.SECURITY_AUDIT,
       DiagnosisCheckType.WP_VERSION,
       
@@ -33,9 +32,8 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
       
       // Layer 4: Database Health
       DiagnosisCheckType.DATABASE_CONNECTION,
-      DiagnosisCheckType.DATABASE_HEALTH,
-      DiagnosisCheckType.TABLE_CORRUPTION_CHECK,
-      DiagnosisCheckType.ORPHANED_TRANSIENTS_DETECTION,
+      DiagnosisCheckType.DATABASE_HEALTH, // Comprehensive database check (includes transients, revisions, orphaned data)
+      DiagnosisCheckType.TABLE_CORRUPTION_CHECK, // Dedicated corruption check with CHECK TABLE
       
       // Layer 5: Performance & Resource Monitoring
       DiagnosisCheckType.PERFORMANCE_METRICS,
@@ -43,16 +41,15 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
       DiagnosisCheckType.UPTIME_MONITORING,
       
       // Layer 6: Plugin & Theme Analysis
-      DiagnosisCheckType.PLUGIN_THEME_ANALYSIS, // Comprehensive analysis includes plugin/theme status
+      DiagnosisCheckType.PLUGIN_THEME_ANALYSIS, // Comprehensive analysis (removed PLUGIN_STATUS, THEME_STATUS duplicates)
       DiagnosisCheckType.UPDATE_STATUS,
       
       // Layer 7: Error Log Analysis
       DiagnosisCheckType.ERROR_LOG_ANALYSIS,
       
       // Layer 8: Security Hardening
-      DiagnosisCheckType.MALWARE_DETECTION,
       DiagnosisCheckType.LOGIN_ATTEMPT_ANALYSIS,
-      DiagnosisCheckType.BACKDOOR_DETECTION,
+      DiagnosisCheckType.BACKDOOR_DETECTION, // Comprehensive malware & backdoor detection (74+ patterns)
       
       // Additional Health Checks
       DiagnosisCheckType.SEO_HEALTH,
@@ -63,7 +60,7 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
     parallelExecution: true,
     useCache: false,
     cacheTTL: 0,
-    description: 'Comprehensive diagnosis with 28+ checks across WordPress layers',
+    description: 'Comprehensive diagnosis with 24 checks across WordPress layers (duplicates removed)',
   },
 
   [DiagnosisProfile.LIGHT]: {
@@ -77,13 +74,13 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
       
       // Layer 2: Core integrity
       DiagnosisCheckType.SECURITY_AUDIT,
-      DiagnosisCheckType.CHECKSUM_VERIFICATION,
+      DiagnosisCheckType.CHECKSUM_VERIFICATION, // Comprehensive core file verification
       
       // Layer 3: Configuration validation
       DiagnosisCheckType.SECURITY_KEYS_VALIDATION,
       
       // Layer 4: Database health
-      DiagnosisCheckType.DATABASE_HEALTH,
+      DiagnosisCheckType.DATABASE_HEALTH, // Comprehensive database check
       DiagnosisCheckType.TABLE_CORRUPTION_CHECK,
       
       // Layer 5: Performance
@@ -96,16 +93,15 @@ export const DIAGNOSIS_PROFILE_CONFIGS: Record<
       DiagnosisCheckType.ERROR_LOG_ANALYSIS,
       
       // Layer 8: Security
-      DiagnosisCheckType.MALWARE_DETECTION,
       DiagnosisCheckType.LOGIN_ATTEMPT_ANALYSIS,
-      DiagnosisCheckType.BACKDOOR_DETECTION,
+      DiagnosisCheckType.BACKDOOR_DETECTION, // Comprehensive malware & backdoor detection (74+ patterns)
     ],
     timeout: 120000, // 120 seconds (increased for additional checks)
     logDepth: 100,
     parallelExecution: true,
     useCache: true,
     cacheTTL: 300, // 5 minutes
-    description: 'Essential checks for scheduled auto-diagnosis with enhanced security validation',
+    description: 'Essential checks for scheduled auto-diagnosis (15 checks, duplicates removed)',
   },
 
   [DiagnosisProfile.QUICK]: {

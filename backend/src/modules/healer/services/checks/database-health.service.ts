@@ -94,16 +94,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         recommendations.push('Delete spam comments');
       }
 
-      // 8. Check database connection
-      const connectionTest = await this.testDatabaseConnection(serverId, sitePath);
-      if (!connectionTest.success) {
-        issues.push('Database connection issues');
-        score -= 30;
-        recommendations.push('Check database credentials in wp-config.php');
-        recommendations.push('Verify database server is running');
-      }
-
-      // 9. PHASE 1 - LAYER 4: Advanced corruption detection
+      // 8. PHASE 1 - LAYER 4: Advanced corruption detection
       const corruptionCheck = await this.checkTableCorruption(serverId, sitePath);
       if (corruptionCheck.corruptedTables.length > 0) {
         issues.push(`${corruptionCheck.corruptedTables.length} corrupted tables detected`);
@@ -118,7 +109,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         recommendations.push('Run table repair: wp db repair --allow-root');
       }
 
-      // 10. PHASE 1 - LAYER 4: Query performance analysis
+      // 9. PHASE 1 - LAYER 4: Query performance analysis
       const queryPerformance = await this.analyzeQueryPerformance(serverId, sitePath);
       if (queryPerformance.slowQueriesCount > 100) {
         issues.push(`${queryPerformance.slowQueriesCount} slow queries detected`);
@@ -132,7 +123,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         recommendations.push(`Add indexes to: ${queryPerformance.missingIndexes.join(', ')}`);
       }
 
-      // 11. PHASE 1 - LAYER 4: Orphaned transients detection
+      // 10. PHASE 1 - LAYER 4: Orphaned transients detection
       const transientsCheck = await this.detectOrphanedTransients(serverId, sitePath);
       if (transientsCheck.cleanupRecommended) {
         issues.push(`${transientsCheck.expiredTransients} expired transients (${transientsCheck.bloatSizeMB.toFixed(2)}MB bloat)`);
@@ -141,7 +132,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         recommendations.push('Run: wp transient delete --expired --allow-root');
       }
 
-      // 12. PHASE 1 - LAYER 4: Auto-increment capacity check
+      // 11. PHASE 1 - LAYER 4: Auto-increment capacity check
       const autoIncrementCheck = await this.checkAutoIncrementCapacity(serverId, sitePath);
       if (autoIncrementCheck.tablesAtRisk.length > 0) {
         const critical = autoIncrementCheck.tablesAtRisk.filter(t => t.percentUsed > 95).length;
@@ -154,7 +145,7 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
         }
       }
 
-      // 13. PHASE 1 - LAYER 4: Database growth tracking
+      // 12. PHASE 1 - LAYER 4: Database growth tracking
       const growthTracking = await this.trackDatabaseGrowth(serverId, sitePath);
       if (growthTracking.currentSizeMB > 5000) {
         issues.push(`Large database: ${growthTracking.currentSizeMB.toFixed(2)}MB`);
@@ -193,7 +184,6 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
           orphanedData,
           autoDrafts,
           spamComments,
-          connectionTest,
           // Phase 1 - Layer 4 additions
           corruptionCheck,
           queryPerformance,
@@ -229,10 +219,64 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
   private async checkDatabaseSize(serverId: string, sitePath: string): Promise<any> {
     try {
       const result = await this.wpCli.execute(serverId, sitePath, 'db size', 15000);
-      const sizeMB = parseFloat(result.replace(/[^0-9.]/g, ''));
+      
+      // Parse wp db size output format:
+      // Name	Size
+      // database_name	66404352 B
+      const lines = result.trim().split('\n');
+      
+      if (lines.length < 2) {
+        return { sizeMB: 0, sizeFormatted: result.trim() };
+      }
+      
+      // Get the last line (actual data)
+      const dataLine = lines[lines.length - 1];
+      const parts = dataLine.split('\t');
+      
+      if (parts.length < 2) {
+        return { sizeMB: 0, sizeFormatted: result.trim() };
+      }
+      
+      // Extract size from second column (e.g., "66404352 B")
+      const sizeStr = parts[1].trim();
+      const sizeMatch = sizeStr.match(/^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$/i);
+      
+      if (!sizeMatch) {
+        return { sizeMB: 0, sizeFormatted: result.trim() };
+      }
+      
+      const sizeValue = parseFloat(sizeMatch[1]);
+      const unit = sizeMatch[2].toUpperCase();
+      
+      // Convert to MB
+      let sizeMB = 0;
+      switch (unit) {
+        case 'B':
+          sizeMB = sizeValue / (1024 * 1024);
+          break;
+        case 'KB':
+        case 'K':
+          sizeMB = sizeValue / 1024;
+          break;
+        case 'MB':
+        case 'M':
+          sizeMB = sizeValue;
+          break;
+        case 'GB':
+        case 'G':
+          sizeMB = sizeValue * 1024;
+          break;
+        case 'TB':
+        case 'T':
+          sizeMB = sizeValue * 1024 * 1024;
+          break;
+        default:
+          // Assume bytes if no unit
+          sizeMB = sizeValue / (1024 * 1024);
+      }
 
       return {
-        sizeMB,
+        sizeMB: Math.round(sizeMB * 100) / 100, // Round to 2 decimal places
         sizeFormatted: result.trim(),
       };
     } catch (error) {
@@ -359,27 +403,6 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
     } catch (error) {
       this.logger.warn(`Failed to check spam comments: ${(error as Error).message}`);
       return { count: 0 };
-    }
-  }
-
-  /**
-   * Test database connection
-   */
-  private async testDatabaseConnection(
-    serverId: string,
-    sitePath: string,
-  ): Promise<any> {
-    try {
-      const result = await this.wpCli.execute(serverId, sitePath, 'db check', 15000);
-      return {
-        success: !result.toLowerCase().includes('error'),
-        message: result.trim(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: (error as Error).message,
-      };
     }
   }
 

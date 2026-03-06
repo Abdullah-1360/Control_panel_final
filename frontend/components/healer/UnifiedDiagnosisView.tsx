@@ -1,12 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, Zap, Clock, Settings, TrendingUp } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Activity, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
 interface UnifiedDiagnosisViewProps {
@@ -14,50 +13,8 @@ interface UnifiedDiagnosisViewProps {
   selectedSubdomain?: string;
 }
 
-type DiagnosisProfile = 'FULL' | 'LIGHT' | 'QUICK' | 'CUSTOM';
-
-const PROFILE_INFO = {
-  FULL: {
-    icon: Activity,
-    label: 'Full Diagnosis',
-    description: 'Comprehensive analysis with all checks (120s timeout)',
-    color: 'blue',
-    checks: 'All checks enabled',
-    cache: 'No caching',
-    useCase: 'Manual troubleshooting, deep investigation',
-  },
-  LIGHT: {
-    icon: Zap,
-    label: 'Light Diagnosis',
-    description: 'Critical checks only (60s timeout)',
-    color: 'green',
-    checks: 'Critical checks only',
-    cache: '5-minute cache',
-    useCase: 'Scheduled monitoring, quick health check',
-  },
-  QUICK: {
-    icon: Clock,
-    label: 'Quick Check',
-    description: 'Fast feedback with minimal checks (30s timeout)',
-    color: 'yellow',
-    checks: 'HTTP status + maintenance mode',
-    cache: '1-minute cache',
-    useCase: 'Rapid status verification',
-  },
-  CUSTOM: {
-    icon: Settings,
-    label: 'Custom Diagnosis',
-    description: 'Select specific checks to run',
-    color: 'purple',
-    checks: 'User-defined',
-    cache: 'No caching',
-    useCase: 'Targeted investigation',
-  },
-};
-
 export function UnifiedDiagnosisView({ siteId, selectedSubdomain }: UnifiedDiagnosisViewProps) {
   const queryClient = useQueryClient();
-  const [selectedProfile, setSelectedProfile] = useState<DiagnosisProfile>('FULL');
   const [diagnosisResult, setDiagnosisResult] = useState<any>(null);
 
   // Helper to get auth headers
@@ -76,7 +33,6 @@ export function UnifiedDiagnosisView({ siteId, selectedSubdomain }: UnifiedDiagn
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          profile: selectedProfile,
           subdomain: selectedSubdomain !== '__main__' ? selectedSubdomain : undefined,
         }),
       });
@@ -98,116 +54,55 @@ export function UnifiedDiagnosisView({ siteId, selectedSubdomain }: UnifiedDiagn
     },
   });
 
-  // Get available profiles
-  const { data: profiles } = useQuery({
-    queryKey: ['diagnosis-profiles'],
-    queryFn: async () => {
-      const response = await fetch('http://localhost:3001/api/v1/healer/profiles', {
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) throw new Error('Failed to fetch profiles');
-      const result = await response.json();
-      return result.data || result;
-    },
-    staleTime: 60 * 60 * 1000, // 1 hour
-  });
-
-  const profileInfo = PROFILE_INFO[selectedProfile];
-  const ProfileIcon = profileInfo.icon;
-
   return (
     <div className="space-y-6">
-      {/* Profile Selection */}
+      {/* Diagnosis Action */}
       {!diagnosisResult && (
         <Card>
           <CardHeader>
-            <CardTitle>Select Diagnosis Profile</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Run Full Diagnosis
+            </CardTitle>
             <CardDescription>
-              Choose the depth and scope of analysis based on your needs
+              Comprehensive analysis with all checks enabled
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Profile Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {(Object.keys(PROFILE_INFO) as DiagnosisProfile[]).map((profile) => {
-                const info = PROFILE_INFO[profile];
-                const Icon = info.icon;
-                const isSelected = selectedProfile === profile;
-
-                return (
-                  <Card
-                    key={profile}
-                    className={`cursor-pointer transition-all ${
-                      isSelected
-                        ? 'ring-2 ring-primary shadow-lg'
-                        : 'hover:shadow-md hover:border-primary/50'
-                    }`}
-                    onClick={() => setSelectedProfile(profile)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <Icon className={`h-5 w-5 text-${info.color}-500`} />
-                        {isSelected && (
-                          <Badge variant="default" className="text-xs">
-                            Selected
-                          </Badge>
-                        )}
-                      </div>
-                      <CardTitle className="text-base">{info.label}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <p className="text-sm text-muted-foreground">{info.description}</p>
-                      <div className="space-y-1 text-xs text-muted-foreground">
-                        <div>
-                          <span className="font-medium">Checks:</span> {info.checks}
-                        </div>
-                        <div>
-                          <span className="font-medium">Cache:</span> {info.cache}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                This will run a complete diagnosis including:
+              </p>
+              <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                <li>Availability & accessibility checks</li>
+                <li>Core WordPress integrity verification</li>
+                <li>Configuration validation</li>
+                <li>Database health analysis</li>
+                <li>Performance & resource monitoring</li>
+                <li>Plugin & theme analysis</li>
+                <li>Error log analysis</li>
+                <li>Security hardening checks</li>
+              </ul>
             </div>
 
-            {/* Selected Profile Details */}
-            <Card className="bg-muted/50">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="p-3 rounded-lg bg-background">
-                    <ProfileIcon className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-semibold mb-1">{profileInfo.label}</h4>
-                    <p className="text-sm text-muted-foreground mb-3">{profileInfo.description}</p>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium">Use Case:</span>
-                        <p className="text-muted-foreground">{profileInfo.useCase}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium">Checks Included:</span>
-                        <p className="text-muted-foreground">{profileInfo.checks}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Start Diagnosis Button */}
-            <div className="flex justify-center pt-4">
-              <Button
-                onClick={() => diagnoseMutation.mutate()}
-                disabled={diagnoseMutation.isPending}
-                size="lg"
-                className="min-w-[200px]"
-              >
-                <Activity className="mr-2 h-4 w-4" />
-                {diagnoseMutation.isPending ? 'Running Diagnosis...' : 'Start Diagnosis'}
-              </Button>
-            </div>
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={() => diagnoseMutation.mutate()}
+              disabled={diagnoseMutation.isPending || diagnoseMutation.isSuccess}
+            >
+              {diagnoseMutation.isPending ? (
+                <>
+                  <Activity className="mr-2 h-4 w-4 animate-spin" />
+                  Running Diagnosis...
+                </>
+              ) : (
+                <>
+                  <Activity className="mr-2 h-4 w-4" />
+                  Start Diagnosis
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -215,21 +110,15 @@ export function UnifiedDiagnosisView({ siteId, selectedSubdomain }: UnifiedDiagn
       {/* Diagnosis Results */}
       {diagnosisResult && (
         <div className="space-y-6">
-          {/* Health Score Overview */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Diagnosis Results</CardTitle>
-                  <CardDescription>
-                    Profile: {PROFILE_INFO[diagnosisResult.profile]?.label || diagnosisResult.profile}
-                  </CardDescription>
-                </div>
+                <CardTitle>Diagnosis Results</CardTitle>
                 <Button
                   variant="outline"
+                  size="sm"
                   onClick={() => {
                     setDiagnosisResult(null);
-                    setSelectedProfile('FULL');
                   }}
                 >
                   Run New Diagnosis

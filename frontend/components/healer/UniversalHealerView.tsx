@@ -745,7 +745,13 @@ export function UniversalHealerView() {
             </div>
             
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleDiagnose} disabled={diagnoseMutation.isPending}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleDiagnose} 
+                disabled={diagnoseMutation.isPending || selectedApplication.techStack !== 'WORDPRESS'}
+                title={selectedApplication.techStack !== 'WORDPRESS' ? 'Only WordPress sites are supported for diagnosis' : 'Run comprehensive health diagnosis'}
+              >
                 <AlertCircle className="h-4 w-4 mr-2" />
                 Run Diagnosis
               </Button>

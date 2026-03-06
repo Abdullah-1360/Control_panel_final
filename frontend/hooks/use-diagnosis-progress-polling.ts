@@ -110,11 +110,40 @@ export function useDiagnosisProgressPolling({
           return null;
         }
         
+        // If unauthorized, stop polling and notify
+        if (error.status === 401 || error.message?.includes('Unauthorized') || error.message?.includes('Session expired')) {
+          console.error('[useDiagnosisProgressPolling] Authentication error, stopping polling');
+          completedRef.current = true; // Stop polling
+          onErrorRef.current?.(new Error('Session expired. Please login again.'));
+          throw new Error('Session expired. Please login again.');
+        }
+        
+        // If network error (Failed to fetch), it might be a connection issue
+        if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
+          console.error('[useDiagnosisProgressPolling] Network error, backend may be down');
+          onErrorRef.current?.(new Error('Cannot connect to server. Please check your connection.'));
+          throw new Error('Cannot connect to server. Please check your connection.');
+        }
+        
         onErrorRef.current?.(error);
         throw error;
       }
     },
     enabled: enabled && !!diagnosisId,
+    retry: (failureCount, error: any) => {
+      // Don't retry on authentication errors
+      if (error?.status === 401 || error?.message?.includes('Session expired')) {
+        console.log('[useDiagnosisProgressPolling] Not retrying due to auth error');
+        return false;
+      }
+      // Don't retry on network errors after 2 attempts
+      if (error?.message === 'Failed to fetch' || error?.name === 'TypeError') {
+        console.log('[useDiagnosisProgressPolling] Network error, retry count:', failureCount);
+        return failureCount < 2;
+      }
+      // Retry other errors up to 3 times
+      return failureCount < 3;
+    },
     refetchInterval: (query) => {
       // The refetchInterval callback receives a Query object, not the data directly
       // We need to access query.state.data to get the actual progress data

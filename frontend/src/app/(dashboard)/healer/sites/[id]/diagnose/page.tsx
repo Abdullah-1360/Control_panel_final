@@ -8,9 +8,9 @@ import { HealingProgress } from '@/components/healer/HealingProgress';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Activity, Globe } from 'lucide-react';
+import { ArrowLeft, Activity, Globe, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function DiagnosePage() {
@@ -197,7 +197,8 @@ export default function DiagnosePage() {
         </div>
         <Button
           onClick={handleDiagnose}
-          disabled={diagnoseMutation.isPending}
+          disabled={diagnoseMutation.isPending || site?.techStack !== 'WORDPRESS'}
+          title={site?.techStack !== 'WORDPRESS' ? 'Only WordPress sites are supported for diagnosis' : 'Run comprehensive health diagnosis'}
         >
           {diagnoseMutation.isPending && (
             <Activity className="mr-2 h-4 w-4 animate-spin" />
@@ -205,6 +206,19 @@ export default function DiagnosePage() {
           Run Diagnosis
         </Button>
       </div>
+      
+      {/* WordPress-only notice */}
+      {site && site.techStack !== 'WORDPRESS' && (
+        <Alert className="border-yellow-200 bg-yellow-50">
+          <AlertCircle className="h-4 w-4 text-yellow-600" />
+          <AlertTitle className="text-yellow-900">WordPress Sites Only</AlertTitle>
+          <AlertDescription className="text-yellow-700">
+            Diagnosis is currently only supported for WordPress sites.
+            {site.techStack === 'UNKNOWN' && ' Please detect the tech stack first.'}
+            {site.techStack !== 'UNKNOWN' && site.techStack !== 'WORDPRESS' && ' Support for other platforms is coming soon.'}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Subdomain Selection Card */}
       {hasSubdomains && (

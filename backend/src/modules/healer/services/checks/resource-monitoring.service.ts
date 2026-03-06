@@ -108,6 +108,35 @@ export class ResourceMonitoringService implements IDiagnosisCheckService {
 
   private async checkDiskSpace(serverId: string, sitePath: string): Promise<any> {
     try {
+      // Try to get cPanel user quota first
+      const username = await this.getCpanelUsername(serverId, sitePath);
+      
+      if (username) {
+        // Get user-specific disk quota from cPanel
+        const quotaCommand = `quota -s ${username} 2>/dev/null | tail -1 | awk '{print $2, $3}'`;
+        const quotaResult = await this.sshExecutor.executeCommand(serverId, quotaCommand, 10000);
+        
+        if (quotaResult && quotaResult.trim()) {
+          const [used, limit] = quotaResult.trim().split(' ');
+          const usedGB = this.parseSize(used);
+          const limitGB = this.parseSize(limit);
+          
+          if (limitGB > 0) {
+            const usagePercent = Math.round((usedGB / limitGB) * 100);
+            const availableGB = limitGB - usedGB;
+            
+            return {
+              usagePercent,
+              available: `${availableGB.toFixed(2)}GB`,
+              used: `${usedGB.toFixed(2)}GB`,
+              limit: `${limitGB.toFixed(2)}GB`,
+              type: 'user-quota'
+            };
+          }
+        }
+      }
+      
+      // Fallback to directory-specific disk usage
       const command = `df -h ${sitePath} | tail -1 | awk '{print $5 " " $4}'`;
       const result = await this.sshExecutor.executeCommand(serverId, command, 10000);
       const [usageStr, available] = result.trim().split(' ');
@@ -116,9 +145,43 @@ export class ResourceMonitoringService implements IDiagnosisCheckService {
       return {
         usagePercent,
         available,
+        type: 'filesystem'
       };
     } catch (error) {
-      return { usagePercent: 0, available: 'unknown' };
+      return { usagePercent: 0, available: 'unknown', type: 'error' };
+    }
+  }
+
+  private async getCpanelUsername(serverId: string, sitePath: string): Promise<string | null> {
+    try {
+      // Extract username from path (typically /home/username/public_html)
+      const pathParts = sitePath.split('/');
+      const homeIndex = pathParts.indexOf('home');
+      
+      if (homeIndex >= 0 && pathParts.length > homeIndex + 1) {
+        return pathParts[homeIndex + 1];
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private parseSize(sizeStr: string): number {
+    // Parse sizes like "1.5G", "500M", "1024K" to GB
+    const match = sizeStr.match(/^([\d.]+)([KMGT]?)$/i);
+    if (!match) return 0;
+    
+    const value = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+    
+    switch (unit) {
+      case 'K': return value / 1024 / 1024;
+      case 'M': return value / 1024;
+      case 'G': return value;
+      case 'T': return value * 1024;
+      default: return value / 1024 / 1024 / 1024; // Assume bytes
     }
   }
 

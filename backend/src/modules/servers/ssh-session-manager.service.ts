@@ -37,6 +37,7 @@ export class SSHSessionManager implements OnModuleDestroy {
   private readonly cleanupInterval: NodeJS.Timeout;
   private readonly serverConfigCache: Map<string, { config: SSHConnectionConfig; cachedAt: Date }> = new Map();
   private readonly configCacheTimeout = 60000; // 1 minute
+  private readonly sessionLocks: Map<string, Promise<SSHSession>> = new Map(); // Prevent race conditions
 
   constructor(
     private readonly sshConnection: SSHConnectionService,
@@ -117,8 +118,16 @@ export class SSHSessionManager implements OnModuleDestroy {
 
   /**
    * Acquire a session for a server (reuses existing or creates new)
+   * FIXED: Thread-safe to prevent race conditions when multiple checks run in parallel
    */
   private async acquireSession(serverId: string): Promise<SSHSession> {
+    // Check if there's already a session creation in progress for this server
+    const existingLock = this.sessionLocks.get(serverId);
+    if (existingLock) {
+      this.logger.debug(`Waiting for existing session creation for server ${serverId}`);
+      return existingLock;
+    }
+    
     const pool = this.sessions.get(serverId) || [];
     
     // Find available session
@@ -127,32 +136,51 @@ export class SSHSessionManager implements OnModuleDestroy {
       available.inUse = true;
       available.lastUsed = new Date();
       available.commandCount++;
+      this.logger.debug(`Reusing existing SSH session for server ${serverId} (${pool.length} total)`);
       return available;
     }
     
     // Create new session if pool not full
     if (pool.length < this.maxSessionsPerServer) {
-      const config = await this.getServerConfig(serverId);
-      const client = await this.sshConnection.getConnection(serverId, config);
+      // Create a lock to prevent concurrent session creation
+      const sessionPromise = this.createNewSession(serverId, pool);
+      this.sessionLocks.set(serverId, sessionPromise);
       
-      const session: SSHSession = {
-        client,
-        serverId,
-        lastUsed: new Date(),
-        inUse: true,
-        commandCount: 1,
-        createdAt: new Date(),
-      };
-      
-      pool.push(session);
-      this.sessions.set(serverId, pool);
-      
-      this.logger.debug(`Created new SSH session for server ${serverId} (${pool.length}/${this.maxSessionsPerServer})`);
-      return session;
+      try {
+        const session = await sessionPromise;
+        return session;
+      } finally {
+        // Remove lock after session is created
+        this.sessionLocks.delete(serverId);
+      }
     }
     
     // Pool is full, wait for available session
+    this.logger.debug(`Session pool full for server ${serverId}, waiting for available session`);
     return this.waitForAvailableSession(serverId);
+  }
+  
+  /**
+   * Create a new SSH session (extracted to separate method for locking)
+   */
+  private async createNewSession(serverId: string, pool: SSHSession[]): Promise<SSHSession> {
+    const config = await this.getServerConfig(serverId);
+    const client = await this.sshConnection.getConnection(serverId, config);
+    
+    const session: SSHSession = {
+      client,
+      serverId,
+      lastUsed: new Date(),
+      inUse: true,
+      commandCount: 1,
+      createdAt: new Date(),
+    };
+    
+    pool.push(session);
+    this.sessions.set(serverId, pool);
+    
+    this.logger.debug(`Created new SSH session for server ${serverId} (${pool.length}/${this.maxSessionsPerServer})`);
+    return session;
   }
 
   /**

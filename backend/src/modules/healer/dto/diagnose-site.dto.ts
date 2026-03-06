@@ -1,22 +1,13 @@
-import { IsEnum, IsOptional, IsArray, IsString, IsBoolean } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsArray, IsString, IsBoolean, IsEnum } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { DiagnosisProfile, DiagnosisCheckType } from '../enums/diagnosis-profile.enum';
 
 /**
- * DTO for diagnosing a site with profile support
+ * DTO for diagnosing a site (always runs FULL diagnosis)
  */
 export class DiagnoseSiteDto {
-  @ApiProperty({
-    description: 'Diagnosis profile to use',
-    enum: DiagnosisProfile,
-    default: DiagnosisProfile.FULL,
-    example: DiagnosisProfile.FULL,
-  })
-  @IsEnum(DiagnosisProfile)
-  profile: DiagnosisProfile = DiagnosisProfile.FULL;
-
   @ApiPropertyOptional({
-    description: 'Custom checks to run (only for CUSTOM profile)',
+    description: 'Custom checks to run (optional, defaults to all checks)',
     type: [String],
     enum: DiagnosisCheckType,
     example: [DiagnosisCheckType.HTTP_STATUS, DiagnosisCheckType.DATABASE_CONNECTION],

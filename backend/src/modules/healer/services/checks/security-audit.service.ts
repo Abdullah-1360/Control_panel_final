@@ -7,6 +7,10 @@ import {
   CheckPriority,
 } from '../../interfaces/diagnosis-check.interface';
 import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
+import { CommandSanitizer } from '../../utils/command-sanitizer';
+import { RetryHandler } from '../../utils/retry-handler';
+import { CircuitBreakerManager } from '../../utils/circuit-breaker';
+import { MALWARE_PATTERNS, calculateMalwareScore, PLUGIN_WHITELIST, isFileWhitelisted } from '../../config/malware-patterns.config';
 
 /**
  * Security Audit Service
@@ -49,10 +53,18 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     let score = 100;
 
     try {
-      this.logger.log(`Starting security audit for ${domain}`);
+      // Sanitize inputs
+      CommandSanitizer.validateServerId(serverId);
+      const sanitizedPath = CommandSanitizer.sanitizePath(sitePath);
+      const sanitizedDomain = CommandSanitizer.sanitizeDomain(domain);
 
-      // 1. Check file permissions
-      const permissionIssues = await this.checkFilePermissions(serverId, sitePath);
+      this.logger.log(`Starting security audit for ${sanitizedDomain}`);
+
+      // 1. Check file permissions with retry
+      const permissionIssues = await RetryHandler.executeWithRetry(
+        () => this.checkFilePermissions(serverId, sanitizedPath),
+        { maxRetries: 2 }
+      );
       if (permissionIssues.length > 0) {
         issues.push(`${permissionIssues.length} file permission issues`);
         score -= Math.min(30, permissionIssues.length * 5);
@@ -61,15 +73,19 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 2. Check for debug mode enabled
-      const debugEnabled = await this.checkDebugMode(serverId, sitePath);
+      const debugEnabled = await this.checkDebugMode(serverId, sanitizedPath);
       if (debugEnabled) {
         issues.push('WP_DEBUG is enabled in production');
         score -= 15;
         recommendations.push('Disable WP_DEBUG in wp-config.php');
       }
 
-      // 3. Check SSL certificate
-      const sslIssues = await this.checkSSL(domain);
+      // 3. Check SSL certificate with circuit breaker
+      const sslIssues = await CircuitBreakerManager.execute(
+        `ssl-check-${sanitizedDomain}`,
+        () => this.checkSSL(sanitizedDomain),
+        () => ['SSL check temporarily unavailable']
+      );
       if (sslIssues.length > 0) {
         issues.push(`SSL issues: ${sslIssues.join(', ')}`);
         score -= Math.min(25, sslIssues.length * 10);
@@ -77,8 +93,12 @@ export class SecurityAuditService implements IDiagnosisCheckService {
         recommendations.push('Ensure HTTPS is properly configured');
       }
 
-      // 4. Check security headers
-      const missingHeaders = await this.checkSecurityHeaders(domain);
+      // 4. Check security headers with circuit breaker
+      const missingHeaders = await CircuitBreakerManager.execute(
+        `headers-check-${sanitizedDomain}`,
+        () => this.checkSecurityHeaders(sanitizedDomain),
+        () => []
+      );
       if (missingHeaders.length > 0) {
         issues.push(`${missingHeaders.length} security headers missing`);
         score -= Math.min(20, missingHeaders.length * 3);
@@ -86,7 +106,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 5. Check for exposed sensitive files
-      const exposedFiles = await this.checkExposedFiles(serverId, sitePath);
+      const exposedFiles = await this.checkExposedFiles(serverId, sanitizedPath);
       if (exposedFiles.length > 0) {
         issues.push(`${exposedFiles.length} sensitive files exposed`);
         score -= Math.min(25, exposedFiles.length * 5);
@@ -94,7 +114,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 6. Check database prefix
-      const weakDbPrefix = await this.checkDatabasePrefix(serverId, sitePath);
+      const weakDbPrefix = await this.checkDatabasePrefix(serverId, sanitizedPath);
       if (weakDbPrefix) {
         issues.push('Using default database prefix (wp_)');
         score -= 10;
@@ -102,7 +122,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 7. Check for file editing enabled
-      const fileEditingEnabled = await this.checkFileEditing(serverId, sitePath);
+      const fileEditingEnabled = await this.checkFileEditing(serverId, sanitizedPath);
       if (fileEditingEnabled) {
         issues.push('File editing enabled in WordPress admin');
         score -= 10;
@@ -110,15 +130,18 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 8. Check for XML-RPC enabled
-      const xmlRpcEnabled = await this.checkXmlRpc(serverId, sitePath);
+      const xmlRpcEnabled = await this.checkXmlRpc(serverId, sanitizedPath);
       if (xmlRpcEnabled) {
         issues.push('XML-RPC is enabled (DDoS risk)');
         score -= 10;
         recommendations.push('Disable XML-RPC if not needed');
       }
 
-      // 9. PHASE 1 - LAYER 2: Verify core file checksums
-      const checksumResults = await this.verifyCoreFileChecksums(serverId, sitePath);
+      // 9. PHASE 1 - LAYER 2: Verify core file checksums with retry
+      const checksumResults = await RetryHandler.executeWithRetry(
+        () => this.verifyCoreFileChecksums(serverId, sanitizedPath),
+        { maxRetries: 2 }
+      );
       if (checksumResults.modifiedFiles.length > 0) {
         issues.push(`${checksumResults.modifiedFiles.length} core files modified`);
         score -= Math.min(40, checksumResults.modifiedFiles.length * 5);
@@ -131,8 +154,11 @@ export class SecurityAuditService implements IDiagnosisCheckService {
         recommendations.push('Reinstall WordPress core files');
       }
 
-      // 10. PHASE 1 - LAYER 2: Scan for malware signatures
-      const malwareScan = await this.scanForMalwareSignatures(serverId, sitePath);
+      // 10. PHASE 1 - LAYER 2: Scan for malware signatures with enhanced patterns
+      const malwareScan = await RetryHandler.executeWithRetry(
+        () => this.scanForMalwareSignatures(serverId, sanitizedPath),
+        { maxRetries: 2 }
+      );
       if (malwareScan.suspiciousFiles.length > 0) {
         const highConfidence = malwareScan.suspiciousFiles.filter(f => f.confidence === 'HIGH').length;
         issues.push(`${malwareScan.suspiciousFiles.length} suspicious files detected (${highConfidence} high confidence)`);
@@ -142,7 +168,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       }
 
       // 11. PHASE 1 - LAYER 2: Validate .htaccess security
-      const htaccessSecurity = await this.validateHtaccessSecurity(serverId, sitePath);
+      const htaccessSecurity = await this.validateHtaccessSecurity(serverId, sanitizedPath);
       if (!htaccessSecurity.isClean) {
         const critical = htaccessSecurity.issues.filter(i => i.severity === 'CRITICAL').length;
         issues.push(`${htaccessSecurity.issues.length} .htaccess security issues (${critical} critical)`);
@@ -219,7 +245,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
     try {
       for (const [file, expectedPerm] of Object.entries(this.CRITICAL_FILES)) {
         const filePath = file.startsWith('/') ? file : `${sitePath}/${file}`;
-        const command = `stat -c '%a' ${filePath} 2>/dev/null || echo "NOT_FOUND"`;
+        const command = `stat -c '%a' ${CommandSanitizer.escapeShellArg(filePath)} 2>/dev/null || echo "NOT_FOUND"`;
 
         const result = await this.sshExecutor.executeCommand(serverId, command, 10000);
         const actualPerm = result.trim();
@@ -264,7 +290,11 @@ export class SecurityAuditService implements IDiagnosisCheckService {
    */
   private async checkDebugMode(serverId: string, sitePath: string): Promise<boolean> {
     try {
-      const command = `grep -i "define.*WP_DEBUG.*true" ${sitePath}/wp-config.php 2>/dev/null`;
+      const command = CommandSanitizer.buildGrepCommand(
+        'define.*WP_DEBUG.*true',
+        `${sitePath}/wp-config.php`,
+        '-i'
+      );
       const result = await this.sshExecutor.executeCommand(serverId, command, 10000);
       return result.trim() !== '';
     } catch (error) {
@@ -468,7 +498,7 @@ export class SecurityAuditService implements IDiagnosisCheckService {
 
   /**
    * Scan for malware signatures in WordPress files
-   * Phase 1 - Layer 2: Enhanced Malware Detection
+   * Phase 1 - Layer 2: Enhanced Malware Detection with confidence scoring
    */
   private async scanForMalwareSignatures(
     serverId: string,
@@ -478,46 +508,61 @@ export class SecurityAuditService implements IDiagnosisCheckService {
       file: string;
       reason: string;
       confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+      pattern: string;
     }>;
     totalScanned: number;
+    malwareScore: number;
   }> {
     try {
       const suspiciousFiles: Array<{
         file: string;
         reason: string;
         confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+        severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+        pattern: string;
       }> = [];
+      
+      // Count total PHP files to scan
+      const countCommand = CommandSanitizer.buildFindCommand(
+        `${sitePath}/wp-content`,
+        '-name "*.php" -type f | wc -l'
+      );
+      const countResult = await this.sshExecutor.executeCommand(serverId, countCommand, 15000);
+      const totalScanned = parseInt(countResult.trim() || '0');
 
-      // 1. Scan for suspicious patterns in PHP files
-      const suspiciousPatterns = [
-        { pattern: 'base64_decode', confidence: 'MEDIUM' as const },
-        { pattern: 'eval\\(', confidence: 'HIGH' as const },
-        { pattern: 'system\\(', confidence: 'HIGH' as const },
-        { pattern: 'exec\\(', confidence: 'HIGH' as const },
-        { pattern: 'shell_exec', confidence: 'HIGH' as const },
-        { pattern: 'gzinflate', confidence: 'MEDIUM' as const },
-        { pattern: 'str_rot13', confidence: 'MEDIUM' as const },
-        { pattern: 'assert\\(', confidence: 'MEDIUM' as const },
-        { pattern: 'preg_replace.*\/e', confidence: 'HIGH' as const },
-        { pattern: 'create_function', confidence: 'MEDIUM' as const },
-      ];
-
-      for (const { pattern, confidence } of suspiciousPatterns) {
-        const command = `grep -rl "${pattern}" ${sitePath}/wp-content/plugins ${sitePath}/wp-content/themes ${sitePath}/wp-content/uploads 2>/dev/null | head -20`;
+      // 1. Scan for suspicious patterns using enhanced malware pattern database
+      for (const patternInfo of MALWARE_PATTERNS) {
+        const command = CommandSanitizer.buildGrepCommand(
+          patternInfo.pattern,
+          `${sitePath}/wp-content/plugins ${sitePath}/wp-content/themes ${sitePath}/wp-content/uploads`,
+          '-rl'
+        ) + ' | head -20';
+        
         const result = await this.sshExecutor.executeCommand(serverId, command, 30000);
         
         const files = result.trim().split('\n').filter(f => f);
         for (const file of files) {
-          suspiciousFiles.push({
-            file: file.replace(sitePath + '/', ''),
-            reason: `Contains suspicious pattern: ${pattern}`,
-            confidence,
-          });
+          const relativePath = file.replace(sitePath + '/', '');
+          
+          // Check if file is in whitelist using the new function
+          if (!isFileWhitelisted(relativePath)) {
+            suspiciousFiles.push({
+              file: relativePath,
+              reason: patternInfo.description,
+              confidence: patternInfo.confidence,
+              severity: patternInfo.severity,
+              pattern: patternInfo.pattern,
+            });
+          }
         }
       }
 
       // 2. Check for files with double extensions (file.php.jpg)
-      const doubleExtCommand = `find ${sitePath}/wp-content -type f -name "*.php.*" 2>/dev/null`;
+      const doubleExtCommand = CommandSanitizer.buildFindCommand(
+        `${sitePath}/wp-content`,
+        '-type f -name "*.php.*"'
+      );
       const doubleExtResult = await this.sshExecutor.executeCommand(serverId, doubleExtCommand, 15000);
       
       const doubleExtFiles = doubleExtResult.trim().split('\n').filter(f => f);
@@ -526,11 +571,16 @@ export class SecurityAuditService implements IDiagnosisCheckService {
           file: file.replace(sitePath + '/', ''),
           reason: 'Double extension (potential disguised PHP file)',
           confidence: 'HIGH',
+          severity: 'CRITICAL',
+          pattern: 'double_extension',
         });
       }
 
       // 3. Scan wp-content/uploads for unexpected PHP files
-      const uploadsPhpCommand = `find ${sitePath}/wp-content/uploads -name "*.php" -type f 2>/dev/null`;
+      const uploadsPhpCommand = CommandSanitizer.buildFindCommand(
+        `${sitePath}/wp-content/uploads`,
+        '-name "*.php" -type f'
+      );
       const uploadsPhpResult = await this.sshExecutor.executeCommand(serverId, uploadsPhpCommand, 15000);
       
       const uploadsPhpFiles = uploadsPhpResult.trim().split('\n').filter(f => f);
@@ -539,43 +589,36 @@ export class SecurityAuditService implements IDiagnosisCheckService {
           file: file.replace(sitePath + '/', ''),
           reason: 'PHP file in uploads directory (should not exist)',
           confidence: 'HIGH',
+          severity: 'CRITICAL',
+          pattern: 'php_in_uploads',
         });
       }
 
-      // 4. Check for high entropy files (often obfuscated malware)
-      // This is a simplified check - production would use more sophisticated entropy calculation
-      const highEntropyCommand = `find ${sitePath}/wp-content -name "*.php" -type f -exec wc -c {} \\; 2>/dev/null | awk '$1 > 100000 {print $2}' | head -10`;
-      const highEntropyResult = await this.sshExecutor.executeCommand(serverId, highEntropyCommand, 30000);
-      
-      const highEntropyFiles = highEntropyResult.trim().split('\n').filter(f => f);
-      for (const file of highEntropyFiles) {
-        // Check if file contains suspicious patterns
-        const contentCheck = `grep -l "base64_decode\\|eval\\|gzinflate" ${file} 2>/dev/null`;
-        const hasPattern = await this.sshExecutor.executeCommand(serverId, contentCheck, 10000);
-        
-        if (hasPattern.trim()) {
-          suspiciousFiles.push({
-            file: file.replace(sitePath + '/', ''),
-            reason: 'Large file with suspicious patterns (potential obfuscated malware)',
-            confidence: 'HIGH',
-          });
-        }
-      }
+      // Calculate weighted malware score
+      const matches = suspiciousFiles.map(sf => ({
+        pattern: MALWARE_PATTERNS.find(p => p.pattern === sf.pattern) || {
+          pattern: sf.pattern,
+          confidence: sf.confidence,
+          falsePositiveRate: 0.1,
+          description: sf.reason,
+          severity: sf.severity,
+        },
+        file: sf.file,
+      }));
 
-      // Count total files scanned
-      const totalCommand = `find ${sitePath}/wp-content -name "*.php" -type f 2>/dev/null | wc -l`;
-      const totalResult = await this.sshExecutor.executeCommand(serverId, totalCommand, 30000);
-      const totalScanned = parseInt(totalResult.trim()) || 0;
+      const scoreResult = calculateMalwareScore(matches);
 
       return {
         suspiciousFiles,
         totalScanned,
+        malwareScore: scoreResult.score,
       };
     } catch (error) {
       this.logger.error(`Malware scan failed: ${(error as Error).message}`);
       return {
         suspiciousFiles: [],
         totalScanned: 0,
+        malwareScore: 0,
       };
     }
   }

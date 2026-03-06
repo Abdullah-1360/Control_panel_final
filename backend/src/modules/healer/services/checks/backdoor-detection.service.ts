@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckResult, CheckStatus, IDiagnosisCheckService, CheckPriority } from '../../interfaces/diagnosis-check.interface';
 import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
 import { SSHExecutorService } from '../ssh-executor.service';
+import { CommandSanitizer } from '../../utils/command-sanitizer';
+import { RetryHandler } from '../../utils/retry-handler';
+import { MALWARE_PATTERNS, calculateMalwareScore, PLUGIN_WHITELIST, SUSPICIOUS_FILENAMES, isFileWhitelisted } from '../../config/malware-patterns.config';
 
 @Injectable()
 export class BackdoorDetectionService implements IDiagnosisCheckService {
@@ -13,10 +16,18 @@ export class BackdoorDetectionService implements IDiagnosisCheckService {
     const startTime = Date.now();
     
     try {
-      this.logger.log(`Scanning for backdoors in site: ${domain}`);
+      // Sanitize inputs
+      CommandSanitizer.validateServerId(serverId);
+      const sanitizedPath = CommandSanitizer.sanitizePath(sitePath);
+      const sanitizedDomain = CommandSanitizer.sanitizeDomain(domain);
 
-      // Perform comprehensive backdoor detection
-      const backdoorResults = await this.scanForBackdoors(serverId, sitePath);
+      this.logger.log(`Scanning for backdoors in site: ${sanitizedDomain}`);
+
+      // Perform comprehensive backdoor detection with retry
+      const backdoorResults = await RetryHandler.executeWithRetry(
+        () => this.scanForBackdoors(serverId, sanitizedPath),
+        { maxRetries: 2 }
+      );
       
       let status = CheckStatus.PASS;
       let score = 100;
@@ -47,7 +58,9 @@ export class BackdoorDetectionService implements IDiagnosisCheckService {
       if (backdoorResults.executableUploads > 0) {
         status = CheckStatus.FAIL;
         score = Math.min(score, 20);
+        message = `${backdoorResults.executableUploads} executable file(s) found in uploads directory`;
         recommendations.push('Remove executable files from uploads directory');
+        recommendations.push('Uploads directory should only contain media files');
       }
 
       return {
@@ -108,42 +121,68 @@ export class BackdoorDetectionService implements IDiagnosisCheckService {
       suspiciousFiles: [] as any[],
       executableUploads: 0,
       patternsUsed: [] as string[],
-      scanDuration: 0
+      scanDuration: 0,
+      malwareScore: 0
     };
 
     try {
-      // Define backdoor patterns to search for
-      const backdoorPatterns = [
-        { pattern: 'eval\\s*\\(\\s*base64_decode', severity: 'critical', description: 'Base64 encoded eval execution' },
-        { pattern: 'system\\s*\\(\\s*\\$_', severity: 'critical', description: 'System command execution from user input' },
-        { pattern: 'exec\\s*\\(\\s*\\$_', severity: 'critical', description: 'Exec command from user input' },
-        { pattern: 'shell_exec\\s*\\(\\s*\\$_', severity: 'critical', description: 'Shell execution from user input' },
-        { pattern: 'passthru\\s*\\(\\s*\\$_', severity: 'critical', description: 'Passthru execution from user input' },
-        { pattern: 'file_get_contents\\s*\\(\\s*["\']http', severity: 'warning', description: 'Remote file inclusion attempt' },
-        { pattern: 'curl_exec\\s*\\(.*\\$_', severity: 'warning', description: 'CURL execution with user input' },
-        { pattern: 'preg_replace.*\\/e', severity: 'critical', description: 'Deprecated preg_replace /e modifier' },
-        { pattern: 'assert\\s*\\(\\s*\\$_', severity: 'critical', description: 'Assert with user input' },
-        { pattern: 'create_function.*\\$_', severity: 'warning', description: 'Dynamic function creation' },
-        { pattern: '\\$GLOBALS\\[.*\\]\\s*\\(', severity: 'warning', description: 'Dynamic function call via GLOBALS' },
-        { pattern: 'str_rot13\\s*\\(.*base64', severity: 'warning', description: 'ROT13 with base64 obfuscation' },
-        { pattern: 'gzinflate\\s*\\(\\s*base64_decode', severity: 'critical', description: 'Compressed base64 payload' },
-        { pattern: '\\$_POST\\[.*\\]\\s*\\(', severity: 'critical', description: 'Function execution via POST data' },
-        { pattern: '\\$_GET\\[.*\\]\\s*\\(', severity: 'critical', description: 'Function execution via GET data' }
-      ];
+      results.patternsUsed = MALWARE_PATTERNS.map(p => p.description);
 
-      results.patternsUsed = backdoorPatterns.map(p => p.description);
-
-      // Scan PHP files for backdoor patterns
-      for (const patternInfo of backdoorPatterns) {
+      // Scan PHP files for backdoor patterns using enhanced pattern database
+      // Only scan HIGH confidence and CRITICAL severity patterns to reduce scan time
+      const criticalPatterns = MALWARE_PATTERNS.filter(
+        p => (p.confidence === 'HIGH' && p.severity === 'CRITICAL') || 
+             (p.confidence === 'HIGH' && p.severity === 'HIGH')
+      );
+      
+      this.logger.log(`Scanning with ${criticalPatterns.length} critical patterns`);
+      
+      for (const patternInfo of criticalPatterns) {
         const suspiciousFiles = await this.scanForPattern(serverId, sitePath, patternInfo.pattern);
         
         for (const file of suspiciousFiles) {
-          results.suspiciousFiles.push({
-            file,
-            pattern: patternInfo.description,
-            severity: patternInfo.severity,
-            patternMatched: patternInfo.pattern
-          });
+          const relativePath = file.replace(sitePath + '/', '');
+          
+          // Check if file is in whitelist
+          const isWhitelisted = patternInfo.whitelist?.some(wl => relativePath.includes(wl)) ||
+                               PLUGIN_WHITELIST.some(wl => relativePath.includes(wl));
+          
+          if (!isWhitelisted) {
+            results.suspiciousFiles.push({
+              file: relativePath,
+              pattern: patternInfo.description,
+              severity: patternInfo.severity.toLowerCase(),
+              patternMatched: patternInfo.pattern,
+              confidence: patternInfo.confidence
+            });
+          }
+        }
+      }
+
+      // Check for suspicious filenames
+      for (const suspiciousName of SUSPICIOUS_FILENAMES) {
+        const command = CommandSanitizer.buildFindCommand(
+          sitePath,
+          `-name "${suspiciousName}" -type f`
+        );
+        const result = await this.sshExecutor.executeCommandDetailed(serverId, command);
+        
+        if (result.success && result.output) {
+          const files = result.output.trim().split('\n').filter(f => f);
+          for (const file of files) {
+            const relativePath = file.replace(sitePath + '/', '');
+            
+            // Use the new whitelist function
+            if (!isFileWhitelisted(relativePath)) {
+              results.suspiciousFiles.push({
+                file: relativePath,
+                pattern: `Suspicious filename: ${suspiciousName}`,
+                severity: 'critical',
+                patternMatched: suspiciousName,
+                confidence: 'HIGH'
+              });
+            }
+          }
         }
       }
 
@@ -152,6 +191,21 @@ export class BackdoorDetectionService implements IDiagnosisCheckService {
 
       // Count total files scanned (approximate)
       results.totalFilesScanned = await this.countPhpFiles(serverId, sitePath);
+
+      // Calculate malware score
+      const matches = results.suspiciousFiles.map(sf => ({
+        pattern: MALWARE_PATTERNS.find(p => p.pattern === sf.patternMatched) || {
+          pattern: sf.patternMatched,
+          confidence: sf.confidence as 'HIGH' | 'MEDIUM' | 'LOW',
+          falsePositiveRate: 0.1,
+          description: sf.pattern,
+          severity: sf.severity.toUpperCase() as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW',
+        },
+        file: sf.file,
+      }));
+
+      const scoreResult = calculateMalwareScore(matches);
+      results.malwareScore = scoreResult.score;
 
       results.scanDuration = Date.now() - scanStart;
       return results;
@@ -163,9 +217,15 @@ export class BackdoorDetectionService implements IDiagnosisCheckService {
 
   private async scanForPattern(serverId: string, sitePath: string, pattern: string): Promise<string[]> {
     try {
-      // Use grep to search for the pattern in PHP files
-      const command = `find "${sitePath}" -name "*.php" -type f -exec grep -l "${pattern}" {} \\; 2>/dev/null | head -20`;
-      const result = await this.sshExecutor.executeCommandDetailed(serverId, command);
+      // Use CommandSanitizer to build safe grep command
+      const command = CommandSanitizer.buildGrepCommand(
+        pattern,
+        `"${sitePath}"`,
+        '-rl'
+      ) + ' --include="*.php" | head -20';
+      
+      // Reduced timeout to 15 seconds per pattern to prevent overall timeout
+      const result = await this.sshExecutor.executeCommandDetailed(serverId, command, 15000);
 
       if (result.success && result.output) {
         return result.output.trim().split('\n').filter(file => file.trim());

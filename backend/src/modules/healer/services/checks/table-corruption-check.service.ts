@@ -3,15 +3,21 @@ import { CheckResult, CheckStatus, IDiagnosisCheckService, CheckPriority } from 
 import { DiagnosisCheckType } from '../../enums/diagnosis-profile.enum';
 import { SSHExecutorService } from '../ssh-executor.service';
 import { WpCliService } from '../wp-cli.service';
+import { SecureDatabaseAccess } from '../../utils/secure-database-access';
+import { RetryHandler } from '../../utils/retry-handler';
+import { CircuitBreakerManager } from '../../utils/circuit-breaker';
 
 @Injectable()
 export class TableCorruptionCheckService implements IDiagnosisCheckService {
   private readonly logger = new Logger(TableCorruptionCheckService.name);
+  private readonly secureDatabaseAccess: SecureDatabaseAccess;
 
   constructor(
     private readonly sshExecutor: SSHExecutorService,
     private readonly wpCli: WpCliService
-  ) {}
+  ) {
+    this.secureDatabaseAccess = new SecureDatabaseAccess(sshExecutor);
+  }
 
   async check(serverId: string, sitePath: string, domain: string, config?: any): Promise<CheckResult> {
     const startTime = Date.now();
@@ -25,8 +31,15 @@ export class TableCorruptionCheckService implements IDiagnosisCheckService {
         throw new Error('Unable to retrieve database configuration');
       }
 
-      // Check all WordPress tables for corruption
-      const corruptionResults = await this.checkTableCorruption(serverId, dbConfig);
+      // Check all WordPress tables for corruption with circuit breaker
+      const corruptionResults = await CircuitBreakerManager.execute(
+        `table-corruption-${serverId}`,
+        () => RetryHandler.executeWithRetry(
+          () => this.checkTableCorruption(serverId, dbConfig),
+          { maxRetries: 2 }
+        ),
+        () => []
+      );
       
       let status = CheckStatus.PASS;
       let score = 100;
@@ -223,69 +236,76 @@ export class TableCorruptionCheckService implements IDiagnosisCheckService {
 
   private async checkTableCorruption(serverId: string, dbConfig: any): Promise<any[]> {
     try {
-      // Get list of WordPress tables
-      const tablesCommand = `mysql -h "${dbConfig.host}" -u "${dbConfig.user}" -p"${dbConfig.password}" "${dbConfig.name}" -e "SHOW TABLES LIKE '${dbConfig.prefix}%';" -s`;
-      const tablesResult = await this.sshExecutor.executeCommandDetailed(serverId, tablesCommand);
+      console.log('[TableCorruptionCheck] Starting table corruption check');
+      console.log('[TableCorruptionCheck] Database config:', { ...dbConfig, password: '***' });
       
-      if (!tablesResult.success || !tablesResult.output) {
-        throw new Error('Failed to retrieve table list');
+      // Get list of WordPress tables using SecureDatabaseAccess
+      console.log('[TableCorruptionCheck] Getting tables with prefix:', dbConfig.prefix);
+      let tables: string[] = [];
+      
+      try {
+        tables = await this.secureDatabaseAccess.getTables(serverId, dbConfig, dbConfig.prefix);
+        console.log('[TableCorruptionCheck] Found tables via MySQL:', tables.length);
+      } catch (mysqlError) {
+        console.error('[TableCorruptionCheck] MySQL getTables failed:', mysqlError);
+        
+        // Fallback: Try using WP-CLI to get tables
+        try {
+          console.log('[TableCorruptionCheck] Trying WP-CLI fallback for table list');
+          const wpCliCommand = `wp db tables --format=csv --allow-root`;
+          const wpCliResult = await this.sshExecutor.executeCommand(serverId, wpCliCommand, 30000);
+          
+          if (wpCliResult) {
+            tables = wpCliResult
+              .trim()
+              .split('\n')
+              .filter(line => line && line.startsWith(dbConfig.prefix))
+              .map(line => line.trim());
+            console.log('[TableCorruptionCheck] Found tables via WP-CLI:', tables.length);
+          }
+        } catch (wpCliError) {
+          console.error('[TableCorruptionCheck] WP-CLI fallback also failed:', wpCliError);
+          throw new Error('Failed to get table list via both MySQL and WP-CLI');
+        }
       }
-
-      const tables = tablesResult.output.trim().split('\n').filter(table => table.trim());
+      
+      if (tables.length === 0) {
+        this.logger.warn('No tables found with prefix: ' + dbConfig.prefix);
+        return [];
+      }
+      
       const results: any[] = [];
 
       // Check each table for corruption
       for (const tableName of tables) {
-        const checkResult = await this.checkSingleTable(serverId, dbConfig, tableName.trim());
-        results.push(checkResult);
-      }
-
-      return results;
-    } catch (error) {
-      this.logger.error('Failed to check table corruption:', error);
-      throw error;
-    }
-  }
-
-  private async checkSingleTable(serverId: string, dbConfig: any, tableName: string): Promise<any> {
-    try {
-      const checkCommand = `mysql -h "${dbConfig.host}" -u "${dbConfig.user}" -p"${dbConfig.password}" "${dbConfig.name}" -e "CHECK TABLE ${tableName};" -s`;
-      const result = await this.sshExecutor.executeCommandDetailed(serverId, checkCommand);
-      
-      if (result.success && result.output) {
-        const lines = result.output.trim().split('\n');
-        const lastLine = lines[lines.length - 1];
-        
-        // Parse CHECK TABLE output
-        const parts = lastLine.split('\t');
-        if (parts.length >= 4) {
-          const status = parts[3].toLowerCase();
-          
-          return {
+        try {
+          console.log('[TableCorruptionCheck] Checking table:', tableName);
+          const checkResult = await this.secureDatabaseAccess.checkTable(serverId, dbConfig, tableName);
+          results.push({
+            tableName: checkResult.tableName,
+            operation: checkResult.operation,
+            messageType: checkResult.messageType,
+            status: this.normalizeTableStatus(checkResult.status),
+            message: checkResult.message,
+          });
+        } catch (tableError) {
+          this.logger.error(`Failed to check table ${tableName}:`, tableError);
+          results.push({
             tableName,
-            operation: parts[1],
-            messageType: parts[2],
-            status: this.normalizeTableStatus(status),
-            message: status,
-            rawOutput: lastLine
-          };
+            operation: 'check',
+            messageType: 'error',
+            status: 'error',
+            message: tableError instanceof Error ? tableError.message : 'Unknown error',
+          });
         }
       }
 
-      return {
-        tableName,
-        status: 'error',
-        message: 'Failed to check table',
-        error: result.error
-      };
+      console.log('[TableCorruptionCheck] Check complete. Results:', results.length);
+      return results;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        tableName,
-        status: 'error',
-        message: `Check failed: ${errorMessage}`,
-        error: errorMessage
-      };
+      this.logger.error('Failed to check table corruption:', error);
+      console.error('[TableCorruptionCheck] Fatal error:', error);
+      throw error;
     }
   }
 

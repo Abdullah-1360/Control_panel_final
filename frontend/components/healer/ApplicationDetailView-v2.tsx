@@ -262,10 +262,21 @@ function DomainCard({
             
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2">
-              <Button onClick={onDiagnose} disabled={isLoading} size="sm">
+              <Button 
+                onClick={onDiagnose} 
+                disabled={isLoading || techStack !== 'WORDPRESS'} 
+                size="sm"
+                title={techStack !== 'WORDPRESS' ? 'Only WordPress sites are supported for diagnosis' : 'Run comprehensive health diagnosis'}
+              >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Run Diagnosis
               </Button>
+              
+              {techStack !== 'WORDPRESS' && (
+                <p className="text-xs text-muted-foreground w-full">
+                  Only WordPress sites are supported for diagnosis currently
+                </p>
+              )}
               
               <Button variant="outline" onClick={onConfigure} disabled={isLoading} size="sm">
                 <Settings className="h-4 w-4 mr-2" />

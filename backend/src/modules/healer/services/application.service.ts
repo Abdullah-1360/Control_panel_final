@@ -863,10 +863,28 @@ export class ApplicationService {
    * WORDPRESS-AWARE: Uses 8-layer UnifiedDiagnosisService for WordPress sites
    */
   async diagnose(applicationId: string, subdomain?: string) {
-    const diagnosisId = require('uuid').v4(); // Generate diagnosis ID
-    this.logger.log(`Diagnosing application ${applicationId}${subdomain ? ` (subdomain: ${subdomain})` : ''} [ID: ${diagnosisId}]`);
+    this.logger.log(`Diagnosing application ${applicationId}${subdomain ? ` (subdomain: ${subdomain})` : ''}`);
 
     const application = await this.findOne(applicationId);
+    
+    // Check if diagnosis is already running for this application
+    const siteId = applicationId; // Use applicationId as siteId for tracking
+    const existingDiagnosisId = this.diagnosisProgress.isRunning(siteId);
+    
+    if (existingDiagnosisId) {
+      this.logger.warn(`Diagnosis already running for application ${applicationId} (diagnosisId: ${existingDiagnosisId})`);
+      return {
+        diagnosisId: existingDiagnosisId,
+        applicationId: application.id,
+        subdomain: subdomain || null,
+        techStack: application.techStack,
+        message: 'Diagnosis already in progress, returning existing diagnosisId',
+        alreadyRunning: true,
+      };
+    }
+    
+    const diagnosisId = require('uuid').v4(); // Generate diagnosis ID
+    this.logger.log(`Starting new diagnosis ${diagnosisId} for application ${applicationId}`);
     
     // Return immediately with diagnosisId, run diagnosis in background
     // This prevents the API call from hanging while diagnosis runs
@@ -1228,14 +1246,42 @@ export class ApplicationService {
       });
     }
     
-    // Update application health score
-    await this.prisma.applications.update({
-      where: { id: application.id },
-      data: {
-        healthScore: diagnosis.healthScore,
-        healthStatus: this.mapHealthStatus(diagnosis.healthScore),
-      },
-    });
+    // Update health score
+    if (subdomain) {
+      // For subdomain diagnosis, update subdomain metadata
+      const metadata = (application.metadata as any) || {};
+      const subdomains = metadata.availableSubdomains || [];
+      const subdomainIndex = subdomains.findIndex((s: any) => s.domain === subdomain);
+      
+      if (subdomainIndex !== -1) {
+        subdomains[subdomainIndex].healthScore = diagnosis.healthScore;
+        subdomains[subdomainIndex].healthStatus = this.mapHealthStatus(diagnosis.healthScore);
+        subdomains[subdomainIndex].lastHealthCheck = new Date().toISOString();
+        
+        await this.prisma.applications.update({
+          where: { id: application.id },
+          data: {
+            metadata: {
+              ...metadata,
+              availableSubdomains: subdomains,
+            },
+          },
+        });
+        
+        this.logger.log(`Updated subdomain ${subdomain} health score: ${diagnosis.healthScore}`);
+      }
+    } else {
+      // For main domain diagnosis, update application health score
+      await this.prisma.applications.update({
+        where: { id: application.id },
+        data: {
+          healthScore: diagnosis.healthScore,
+          healthStatus: this.mapHealthStatus(diagnosis.healthScore),
+        },
+      });
+      
+      this.logger.log(`Updated main domain health score: ${diagnosis.healthScore}`);
+    }
     
     return {
       diagnosisId: diagnosis.diagnosisId || diagnosisId,
@@ -1594,7 +1640,7 @@ export class ApplicationService {
   async collectDetailedMetadata(applicationId: string): Promise<void> {
     this.logger.log(`Collecting detailed metadata for application ${applicationId}`);
 
-    const app = await this.prisma.applications.findUnique({
+    let app = await this.prisma.applications.findUnique({
       where: { id: applicationId },
     });
 
@@ -1604,12 +1650,69 @@ export class ApplicationService {
 
     try {
       // STEP 1: Detect actual tech stack if UNKNOWN or PHP_GENERIC
-      // Only auto-detect if explicitly requested or if PHP_GENERIC (legacy)
-      if (app.techStack === TechStack.UNKNOWN || app.techStack === TechStack.PHP_GENERIC) {
-        this.logger.log(`Tech stack is ${app.techStack}, skipping auto-detection during metadata collection`);
+      // Auto-detect for PHP_GENERIC to upgrade to WordPress/Laravel if applicable
+      if (app.techStack === TechStack.PHP_GENERIC) {
+        this.logger.log(`Tech stack is PHP_GENERIC, attempting to detect specific framework`);
+        
+        try {
+          const server = await this.prisma.servers.findUnique({
+            where: { id: app.serverId },
+          });
+          
+          if (server) {
+            const detection = await this.techStackDetector.detectTechStack(
+              server,
+              app.path,
+            );
+            
+            // Only upgrade if we detected something more specific than PHP_GENERIC
+            if (detection.techStack !== 'PHP_GENERIC' && detection.techStack !== 'UNKNOWN') {
+              this.logger.log(`Upgrading tech stack from PHP_GENERIC to ${detection.techStack}`);
+              
+              await this.prisma.applications.update({
+                where: { id: applicationId },
+                data: {
+                  techStack: detection.techStack as TechStack,
+                  techStackVersion: detection.version,
+                  metadata: {
+                    ...(app.metadata as any),
+                    detectionConfidence: detection.confidence,
+                    detectionMetadata: detection.metadata,
+                  },
+                  updatedAt: new Date(),
+                },
+              });
+              
+              // Refresh app data
+              const updatedApp = await this.prisma.applications.findUnique({
+                where: { id: applicationId },
+                include: {
+                  servers: true,
+                },
+              });
+              
+              if (!updatedApp) {
+                throw new NotFoundException(`Application ${applicationId} not found after update`);
+              }
+              
+              // Update app reference
+              app = updatedApp;
+              
+              this.logger.log(`Tech stack upgraded successfully to ${app.techStack}`);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`Failed to upgrade PHP_GENERIC: ${(error as Error).message}`);
+          // Continue with metadata collection even if detection fails
+        }
+      } else if (app.techStack === TechStack.UNKNOWN) {
+        this.logger.log(`Tech stack is UNKNOWN, skipping auto-detection during metadata collection`);
         this.logger.log(`Use detectTechStack() endpoint to detect tech stack manually`);
-        // Don't auto-detect - let user trigger detection manually
-        // This prevents unwanted tech stack changes during diagnosis
+      }
+      
+      // Ensure app is still valid after potential upgrade
+      if (!app) {
+        throw new NotFoundException(`Application ${applicationId} not found`);
       }
       
       // STEP 2: Extract real domain from cPanel userdata or server config
@@ -1647,6 +1750,13 @@ export class ApplicationService {
         this.logger.log(`Detecting subdomains for ${domain}`);
         availableSubdomains = await this.detectSubdomainsAndAddons(app.serverId, cPanelUsername, domain);
         this.logger.log(`Found ${availableSubdomains.length} related domains`);
+        
+        // Check if any subdomains need tech stack upgrade from PHP_GENERIC
+        for (const subdomain of availableSubdomains) {
+          if (subdomain.techStack === 'PHP_GENERIC') {
+            await this.upgradeSubdomainTechStack(applicationId, subdomain.domain);
+          }
+        }
       }
       
       // STEP 4: Get plugin for tech stack
@@ -2355,6 +2465,36 @@ export class ApplicationService {
       version: detection.version,
       confidence: detection.confidence,
     };
+  }
+
+  /**
+   * Upgrade subdomain from PHP_GENERIC to specific framework if detected
+   */
+  private async upgradeSubdomainTechStack(
+    applicationId: string,
+    subdomain: string,
+  ): Promise<void> {
+    this.logger.log(`Checking if subdomain ${subdomain} needs tech stack upgrade`);
+
+    const application = await this.findOne(applicationId);
+    const subdomains = (application.metadata as any)?.availableSubdomains || [];
+    const subdomainInfo = subdomains.find((s: any) => s.domain === subdomain);
+
+    if (!subdomainInfo || subdomainInfo.techStack !== 'PHP_GENERIC') {
+      return; // No upgrade needed
+    }
+
+    this.logger.log(`Subdomain ${subdomain} is PHP_GENERIC, attempting to detect specific framework`);
+
+    try {
+      const result = await this.detectSubdomainTechStack(applicationId, subdomain);
+      
+      if (result.techStack !== 'PHP_GENERIC' && result.techStack !== 'UNKNOWN') {
+        this.logger.log(`Upgraded subdomain ${subdomain} from PHP_GENERIC to ${result.techStack}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to upgrade subdomain tech stack: ${(error as Error).message}`);
+    }
   }
 
   /**
