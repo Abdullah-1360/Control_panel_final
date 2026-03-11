@@ -66,7 +66,7 @@ model diagnosis_history {
   triggeredBy      String?
   trigger          HealerTrigger
   createdAt        DateTime         @default(now())
-  wp_sites         wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  applications     applications     @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
   @@index([healthScore])
@@ -360,7 +360,7 @@ model health_score_history {
   integrityScore    Int
   maintenanceScore  Int
   createdAt         DateTime         @default(now())
-  wp_sites          wp_sites         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  applications      applications     @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@index([siteId, createdAt])
 }
@@ -752,12 +752,10 @@ model wp_sites {
   maxRetries                Int                         @default(3)
   retryDelayMs              Int                         @default(5000)
   retryStrategy             RetryStrategy               @default(EXPONENTIAL)
-  diagnosis_history         diagnosis_history[]
   healer_backups            healer_backups[]
   healer_executions         healer_executions[]
   healing_action_logs       healing_action_logs[]
   healing_workflows         healing_workflows[]
-  health_score_history      health_score_history[]
   manual_diagnosis_sessions manual_diagnosis_sessions[]
   scheduled_diagnosis       scheduled_diagnosis?
   servers                   servers                     @relation(fields: [serverId], references: [id], onDelete: Cascade)
@@ -1026,6 +1024,9 @@ model applications {
   servers                 servers               @relation(fields: [serverId], references: [id], onDelete: Cascade)
   diagnostic_results      diagnostic_results[]
   healing_executions_new  healing_executions_new[]
+  site_tech_stack         site_tech_stack?      // One-to-one relation
+  diagnosis_history       diagnosis_history[]   // Universal healer diagnosis history
+  health_score_history    health_score_history[] // Universal healer health score history
   
   @@unique([serverId, domain, path])
   @@index([techStack])
@@ -1117,6 +1118,53 @@ model healing_executions_new {
   @@index([status])
   @@index([startedAt])
   @@map("healing_executions_new")
+}
+
+// Site Tech Stack - Persistent tech stack and domain addon information
+model site_tech_stack {
+  id                    String          @id @default(uuid())
+  applicationId         String          @unique @map("application_id")
+  
+  // Tech Stack Information (persisted from detection)
+  techStack             TechStack       @map("tech_stack")
+  techStackVersion      String?         @map("tech_stack_version")
+  detectionMethod       DetectionMethod @map("detection_method")
+  detectionConfidence   Float           @map("detection_confidence")
+  detectedAt            DateTime        @default(now()) @map("detected_at")
+  
+  // Domain Addon Information
+  sslEnabled            Boolean?        @map("ssl_enabled")
+  sslIssuer             String?         @map("ssl_issuer")
+  sslExpiryDate         DateTime?       @map("ssl_expiry_date")
+  
+  // DNS Information
+  dnsRecords            Json?           @map("dns_records") // A, CNAME, MX, TXT records
+  
+  // Email Information
+  emailAccountsCount    Int?            @map("email_accounts_count")
+  emailQuotaUsedMB      Float?          @map("email_quota_used_mb")
+  emailQuotaTotalMB     Float?          @map("email_quota_total_mb")
+  
+  // Domain Type
+  isMainDomain          Boolean         @default(true) @map("is_main_domain")
+  isSubdomain           Boolean         @default(false) @map("is_subdomain")
+  isParkedDomain        Boolean         @default(false) @map("is_parked_domain")
+  isAddonDomain         Boolean         @default(false) @map("is_addon_domain")
+  
+  // Additional Metadata
+  metadata              Json            @default("{}")
+  
+  // Timestamps
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+  
+  // Relations
+  applications          applications    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@index([applicationId])
+  @@index([techStack])
+  @@index([detectedAt])
+  @@map("site_tech_stack")
 }
 
 // ============================================================================

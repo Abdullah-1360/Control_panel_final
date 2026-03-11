@@ -79,6 +79,20 @@ export const healerApi = {
     return await apiClient.get(`/healer/applications?${queryParams}`);
   },
 
+  getDashboardStats: async (): Promise<{
+    totalApps: number;
+    healthyApps: number;
+    issueApps: number;
+    protectedApps: number;
+    breakdown: {
+      healthy: number;
+      degraded: number;
+      down: number;
+    };
+  }> => {
+    return await apiClient.get('/healer/applications/stats/dashboard');
+  },
+
   getApplication: async (id: string): Promise<Application> => {
     return await apiClient.get(`/healer/applications/${id}`);
   },
@@ -245,5 +259,30 @@ export const healerApi = {
     }>;
   }> => {
     return await apiClient.post(`/healer/applications/${id}/detect-all-tech-stacks`, {});
+  },
+
+  // Diagnosis History
+  getDiagnosisHistory: async (
+    id: string,
+    params?: {
+      limit?: number;
+      page?: number;
+      profile?: string;
+    }
+  ): Promise<{
+    data: any[];
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    };
+  }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.profile) queryParams.append('profile', params.profile);
+
+    return await apiClient.get(`/healer/sites/${id}/diagnosis-history?${queryParams}`);
   },
 };

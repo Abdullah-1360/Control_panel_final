@@ -136,7 +136,11 @@ export class OrphanedTransientsDetectionService implements IDiagnosisCheckServic
     try {
       // Method 1: Try WP-CLI config get
       try {
-        const dbConfigOutput = await this.wpCli.execute(serverId, sitePath, 'config get --format=json');
+        const dbConfigOutput = await this.wpCli.execute(
+          serverId, 
+          sitePath, 
+          'config get --format=json --skip-plugins --skip-themes'
+        );
         
         // Clean and parse JSON output
         const cleanOutput = dbConfigOutput.trim();

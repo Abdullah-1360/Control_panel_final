@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DiagnosisHistoryTab } from './DiagnosisHistoryTab';
 import { 
   Server, 
   Globe, 
@@ -24,7 +25,9 @@ import {
   Trash2,
   ExternalLink,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  History,
+  Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -70,6 +73,7 @@ interface DomainCardProps {
   phpVersion?: string;
   dbName?: string;
   isMain?: boolean;
+  applicationId: string; // Add this for history tab
   onDiagnose: () => void;
   onToggleHealer: () => void;
   onConfigure: () => void;
@@ -89,6 +93,7 @@ function DomainCard({
   phpVersion,
   dbName,
   isMain = false,
+  applicationId, // Add this
   onDiagnose,
   onToggleHealer,
   onConfigure,
@@ -103,7 +108,11 @@ function DomainCard({
     icon: '❓'
   };
   
-  const domainTypeConfig = DOMAIN_TYPE_CONFIG[type];
+  const domainTypeConfig = DOMAIN_TYPE_CONFIG[type] || {
+    label: type,
+    color: 'bg-gray-50 text-gray-700 border-gray-200',
+    icon: '📄'
+  };
   
   const getHealthScoreColor = (score: number) => {
     if (score >= 90) return 'text-green-600';
@@ -168,7 +177,7 @@ function DomainCard({
             <div className="text-right">
               <div className="text-sm text-muted-foreground">Health Score</div>
               <div className={cn('text-2xl font-bold', getHealthScoreColor(healthScore))}>
-                {healthScore}%
+                {Math.round(healthScore)}%
               </div>
             </div>
           </div>
@@ -178,116 +187,135 @@ function DomainCard({
       {expanded && (
         <>
           <Separator />
-          <CardContent className="pt-4 space-y-4">
-            {/* Path and Details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Document Root</div>
-                <div className="flex items-center gap-2 text-sm font-mono bg-muted p-2 rounded">
-                  <FolderOpen className="h-3 w-3" />
-                  {path}
-                </div>
-              </div>
+          <CardContent className="pt-4">
+            <Tabs defaultValue="details" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="details" className="flex items-center gap-2">
+                  <Info className="h-4 w-4" />
+                  Details
+                </TabsTrigger>
+                <TabsTrigger value="history" className="flex items-center gap-2">
+                  <History className="h-4 w-4" />
+                  History
+                </TabsTrigger>
+              </TabsList>
               
-              {version && (
-                <div className="space-y-1">
-                  <div className="text-sm text-muted-foreground">Version</div>
-                  <div className="font-medium">{version}</div>
-                </div>
-              )}
-              
-              {phpVersion && (
-                <div className="space-y-1">
-                  <div className="text-sm text-muted-foreground">PHP Version</div>
-                  <div className="font-medium">{phpVersion}</div>
-                </div>
-              )}
-              
-              {dbName && (
-                <div className="space-y-1">
-                  <div className="text-sm text-muted-foreground">Database</div>
-                  <div className="font-medium">{dbName}</div>
-                </div>
-              )}
-            </div>
-            
-            {/* Health Score Progress */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Health Status</span>
-                <span className={getHealthScoreColor(healthScore)}>{healthScore}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className={cn(
-                    'h-2 rounded-full transition-all',
-                    healthScore >= 90 ? 'bg-green-500' :
-                    healthScore >= 70 ? 'bg-yellow-500' : 'bg-red-500'
+              <TabsContent value="details" className="space-y-4 mt-0">
+                {/* Path and Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Document Root</div>
+                    <div className="flex items-center gap-2 text-sm font-mono bg-muted p-2 rounded">
+                      <FolderOpen className="h-3 w-3" />
+                      {path}
+                    </div>
+                  </div>
+                  
+                  {version && (
+                    <div className="space-y-1">
+                      <div className="text-sm text-muted-foreground">Version</div>
+                      <div className="font-medium">{version}</div>
+                    </div>
                   )}
-                  style={{ width: `${healthScore}%` }}
-                />
-              </div>
-            </div>
-            
-            {/* Healer Controls */}
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <Shield className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <div className="font-medium">Auto Healer</div>
-                  <div className="text-sm text-muted-foreground">
-                    {isHealerEnabled ? 'Monitoring and auto-fixing issues' : 'Disabled'}
+                  
+                  {phpVersion && (
+                    <div className="space-y-1">
+                      <div className="text-sm text-muted-foreground">PHP Version</div>
+                      <div className="font-medium">{phpVersion}</div>
+                    </div>
+                  )}
+                  
+                  {dbName && (
+                    <div className="space-y-1">
+                      <div className="text-sm text-muted-foreground">Database</div>
+                      <div className="font-medium">{dbName}</div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Health Score Progress */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Health Status</span>
+                    <span className={getHealthScoreColor(healthScore)}>{Math.round(healthScore)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className={cn(
+                        'h-2 rounded-full transition-all',
+                        healthScore >= 90 ? 'bg-green-500' :
+                        healthScore >= 70 ? 'bg-yellow-500' : 'bg-red-500'
+                      )}
+                      style={{ width: `${Math.min(100, Math.max(0, healthScore))}%` }}
+                    />
                   </div>
                 </div>
-              </div>
-              <Button
-                variant={isHealerEnabled ? 'default' : 'outline'}
-                size="sm"
-                onClick={onToggleHealer}
-                disabled={isLoading}
-              >
-                {isHealerEnabled ? (
-                  <>
-                    <Pause className="h-4 w-4 mr-2" />
-                    Disable
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4 mr-2" />
-                    Enable
-                  </>
-                )}
-              </Button>
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
-              <Button 
-                onClick={onDiagnose} 
-                disabled={isLoading || techStack !== 'WORDPRESS'} 
-                size="sm"
-                title={techStack !== 'WORDPRESS' ? 'Only WordPress sites are supported for diagnosis' : 'Run comprehensive health diagnosis'}
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Run Diagnosis
-              </Button>
+                
+                {/* Healer Controls */}
+                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Shield className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <div className="font-medium">Auto Healer</div>
+                      <div className="text-sm text-muted-foreground">
+                        {isHealerEnabled ? 'Monitoring and auto-fixing issues' : 'Disabled'}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant={isHealerEnabled ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={onToggleHealer}
+                    disabled={isLoading}
+                  >
+                    {isHealerEnabled ? (
+                      <>
+                        <Pause className="h-4 w-4 mr-2" />
+                        Disable
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4 mr-2" />
+                        Enable
+                      </>
+                    )}
+                  </Button>
+                </div>
+                
+                {/* Action Buttons */}
+                <div className="flex flex-wrap gap-2">
+                  <Button 
+                    onClick={onDiagnose} 
+                    disabled={isLoading || techStack !== 'WORDPRESS'} 
+                    size="sm"
+                    title={techStack !== 'WORDPRESS' ? 'Only WordPress sites are supported for diagnosis' : 'Run comprehensive health diagnosis'}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Run Diagnosis
+                  </Button>
+                  
+                  {techStack !== 'WORDPRESS' && (
+                    <p className="text-xs text-muted-foreground w-full">
+                      Only WordPress sites are supported for diagnosis currently
+                    </p>
+                  )}
+                  
+                  <Button variant="outline" onClick={onConfigure} disabled={isLoading} size="sm">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Configure
+                  </Button>
+                  
+                  <Button variant="outline" onClick={onVisit} size="sm">
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Visit Site
+                  </Button>
+                </div>
+              </TabsContent>
               
-              {techStack !== 'WORDPRESS' && (
-                <p className="text-xs text-muted-foreground w-full">
-                  Only WordPress sites are supported for diagnosis currently
-                </p>
-              )}
-              
-              <Button variant="outline" onClick={onConfigure} disabled={isLoading} size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                Configure
-              </Button>
-              
-              <Button variant="outline" onClick={onVisit} size="sm">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Visit Site
-              </Button>
-            </div>
+              <TabsContent value="history" className="mt-0">
+                <DiagnosisHistoryTab applicationId={applicationId} />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </>
       )}
@@ -372,6 +400,7 @@ export function ApplicationDetailView({
           phpVersion={mainDomain.phpVersion}
           dbName={mainDomain.dbName}
           isMain={true}
+          applicationId={application.id}
           onDiagnose={() => onDiagnose?.()}
           onToggleHealer={() => onToggleHealer?.()}
           onConfigure={() => onConfigure?.()}
@@ -402,6 +431,7 @@ export function ApplicationDetailView({
                 version={subdomain.version}
                 phpVersion={subdomain.phpVersion}
                 dbName={subdomain.dbName}
+                applicationId={application.id}
                 onDiagnose={() => onDiagnoseSubdomain?.(subdomain.domain)}
                 onToggleHealer={() => onToggleSubdomainHealer?.(subdomain.domain, !subdomain.isHealerEnabled)}
                 onConfigure={() => onConfigureSubdomain?.(subdomain.domain)}

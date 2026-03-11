@@ -154,7 +154,7 @@ export class UnifiedDiagnosisService {
     const diagnosisId = options.diagnosisId || uuidv4(); // Use provided diagnosisId or generate new one
     
     // Get site details
-    const site = await this.prisma.wp_sites.findUnique({
+    const site = await this.prisma.applications.findUnique({
       where: { id: siteId },
       include: { servers: true },
     });
@@ -163,8 +163,25 @@ export class UnifiedDiagnosisService {
       throw new Error(`Site not found: ${siteId}`);
     }
 
-    // Determine domain to diagnose
-    const domain = options.subdomain || site.domain;
+    // Determine domain and path to diagnose
+    let domain = site.domain;
+    let sitePath = site.path;
+    
+    // If subdomain is provided, resolve its path
+    if (options.subdomain) {
+      domain = options.subdomain;
+      
+      // Find subdomain path from metadata
+      const subdomains = (site.metadata as any)?.availableSubdomains || [];
+      const subdomainInfo = subdomains.find((s: any) => s.domain === options.subdomain);
+      
+      if (subdomainInfo && subdomainInfo.path) {
+        sitePath = subdomainInfo.path;
+        this.logger.log(`Using subdomain path: ${sitePath} for ${domain}`);
+      } else {
+        this.logger.warn(`Subdomain ${options.subdomain} not found in metadata, using main path: ${sitePath}`);
+      }
+    }
     
     // Get profile configuration
     const config = getProfileConfig(profile, options.customChecks);
@@ -186,7 +203,7 @@ export class UnifiedDiagnosisService {
       if (config.useCache && !options.bypassCache) {
         const cached = await this.getCachedResult(
           site.serverId,
-          site.path,
+          sitePath, // Use resolved sitePath (subdomain or main)
           domain,
           profile,
         );
@@ -205,7 +222,7 @@ export class UnifiedDiagnosisService {
       const checkResults = await this.executeChecksWithProgress(
         diagnosisId,
         site.serverId,
-        site.path,
+        sitePath, // Use resolved sitePath (subdomain or main)
         domain,
         config.checks,
       );
@@ -219,7 +236,7 @@ export class UnifiedDiagnosisService {
       // Run legacy diagnosis for backward compatibility
       const diagnosisResult = await this.diagnosisService.diagnose(
         site.serverId,
-        site.path,
+        sitePath, // Use resolved sitePath (subdomain or main)
         domain,
       );
 
@@ -259,6 +276,7 @@ export class UnifiedDiagnosisService {
         canAutoHeal: this.canAutoHeal(diagnosisResult.diagnosisType),
         requiresApproval: site.healingMode !== 'FULL_AUTO',
         checkResults: this.convertCheckResults(checkResults),
+        commandOutputs: diagnosisResult.commandOutputs || {}, // Include command outputs from diagnosis
         duration: Date.now() - startTime,
         timestamp: new Date(),
         cached: false,
@@ -1133,8 +1151,8 @@ export class UnifiedDiagnosisService {
         issuesFound: result.issuesFound,
         criticalIssues: result.criticalIssues,
         warningIssues: result.warningIssues,
-        diagnosisDetails: result as any,
-        commandOutputs: {}, // Will be populated from diagnosisResult
+        diagnosisDetails: result as any, // Store complete result including checkResults
+        commandOutputs: result.commandOutputs || {}, // Include command outputs if available
         duration: result.duration,
         triggeredBy: options.triggeredBy || null,
         trigger: options.trigger || HealerTrigger.MANUAL,
@@ -1175,13 +1193,13 @@ export class UnifiedDiagnosisService {
   ): Promise<void> {
     const healthStatus = this.getHealthStatus(healthScore, diagnosisType);
 
-    await this.prisma.wp_sites.update({
+    // Update applications table (new universal table)
+    await this.prisma.applications.update({
       where: { id: siteId },
       data: {
         healthScore,
         healthStatus,
         lastHealthCheck: new Date(),
-        lastDiagnosedAt: new Date(),
       },
     });
   }
@@ -1399,7 +1417,7 @@ export class UnifiedDiagnosisService {
 
     if (siteId) {
       // Get site to find serverId
-      const site = await this.prisma.wp_sites.findUnique({
+      const site = await this.prisma.applications.findUnique({
         where: { id: siteId },
         select: { serverId: true },
       });

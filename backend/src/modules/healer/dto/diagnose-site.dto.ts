@@ -83,6 +83,9 @@ export interface DiagnosisResultDto {
   // Check Results
   checkResults: DiagnosisCheckResult[];
   
+  // Command Outputs (for history display)
+  commandOutputs?: Record<string, any>;
+  
   // Metadata
   duration: number; // milliseconds
   timestamp: Date;

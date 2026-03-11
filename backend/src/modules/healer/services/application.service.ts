@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { TechStack, DetectionMethod, HealingMode, HealthStatus } from '@prisma/client';
+import { TechStack, DetectionMethod, HealingMode, HealthStatus, HealerTrigger } from '@prisma/client';
 import { TechStackDetectorService } from './tech-stack-detector.service';
 import { PluginRegistryService } from './plugin-registry.service';
 import { SSHExecutorService } from './ssh-executor.service';
@@ -8,6 +8,7 @@ import { CircuitBreakerService } from './circuit-breaker.service';
 import { BackupRollbackService } from './backup-rollback.service';
 import { DiagnosisProgressService } from './diagnosis-progress.service';
 import { UnifiedDiagnosisService } from './unified-diagnosis.service';
+import { TechStackAwareHealingOrchestratorService } from './tech-stack-aware-healing-orchestrator.service';
 import { DiagnosisProfile } from '../enums/diagnosis-profile.enum';
 
 @Injectable()
@@ -24,6 +25,8 @@ export class ApplicationService {
     private readonly diagnosisProgress: DiagnosisProgressService,
     @Inject(forwardRef(() => UnifiedDiagnosisService))
     private readonly unifiedDiagnosis: UnifiedDiagnosisService,
+    @Inject(forwardRef(() => TechStackAwareHealingOrchestratorService))
+    private readonly healingOrchestrator: TechStackAwareHealingOrchestratorService,
   ) {}
 
   /**
@@ -106,6 +109,78 @@ export class ApplicationService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Get dashboard statistics
+   */
+  async getDashboardStats() {
+    const [
+      totalApps,
+      healthyApps,
+      degradedApps,
+      downApps,
+      protectedApps,
+    ] = await Promise.all([
+      // Total applications
+      this.prisma.applications.count({
+        where: {
+          servers: {
+            deletedAt: null, // Exclude soft-deleted servers
+          },
+        },
+      }),
+      // Healthy applications (health score >= 90)
+      this.prisma.applications.count({
+        where: {
+          healthStatus: HealthStatus.HEALTHY,
+          servers: {
+            deletedAt: null,
+          },
+        },
+      }),
+      // Degraded applications
+      this.prisma.applications.count({
+        where: {
+          healthStatus: HealthStatus.DEGRADED,
+          servers: {
+            deletedAt: null,
+          },
+        },
+      }),
+      // Down applications
+      this.prisma.applications.count({
+        where: {
+          healthStatus: HealthStatus.DOWN,
+          servers: {
+            deletedAt: null,
+          },
+        },
+      }),
+      // Protected applications (healer enabled)
+      this.prisma.applications.count({
+        where: {
+          isHealerEnabled: true,
+          servers: {
+            deletedAt: null,
+          },
+        },
+      }),
+    ]);
+
+    const issueApps = degradedApps + downApps;
+
+    return {
+      totalApps,
+      healthyApps,
+      issueApps,
+      protectedApps,
+      breakdown: {
+        healthy: healthyApps,
+        degraded: degradedApps,
+        down: downApps,
       },
     };
   }
@@ -1282,6 +1357,9 @@ export class ApplicationService {
       
       this.logger.log(`Updated main domain health score: ${diagnosis.healthScore}`);
     }
+    
+    // AUTO-HEALING TRIGGER: Trigger healing if enabled and health score is low
+    await this.triggerAutoHealingIfNeeded(application, diagnosis, subdomain);
     
     return {
       diagnosisId: diagnosis.diagnosisId || diagnosisId,
@@ -2665,6 +2743,74 @@ export class ApplicationService {
       addonDomains,
       parkedDomains,
     };
+  }
+
+  /**
+   * Trigger auto-healing if conditions are met after diagnosis
+   */
+  private async triggerAutoHealingIfNeeded(
+    application: any,
+    diagnosis: any,
+    subdomain?: string,
+  ): Promise<void> {
+    try {
+      // Check if healing is enabled for this application
+      if (!application.isHealerEnabled) {
+        this.logger.log(`Auto-healing disabled for ${application.domain}, skipping`);
+        return;
+      }
+
+      // Check healing mode
+      if (application.healingMode === HealingMode.MANUAL) {
+        this.logger.log(`Healing mode is MANUAL for ${application.domain}, skipping auto-healing`);
+        return;
+      }
+
+      // Check if health score is below threshold (e.g., < 70)
+      const healthThreshold = 70;
+      if (diagnosis.healthScore >= healthThreshold) {
+        this.logger.log(
+          `Health score ${diagnosis.healthScore} is above threshold ${healthThreshold}, skipping auto-healing`
+        );
+        return;
+      }
+
+      // Check if there are critical issues
+      if (diagnosis.criticalIssues === 0 && diagnosis.issuesFound === 0) {
+        this.logger.log(`No issues found, skipping auto-healing`);
+        return;
+      }
+
+      // Determine trigger type based on healing mode
+      const trigger = application.healingMode === HealingMode.SEMI_AUTO
+        ? HealerTrigger.SEMI_AUTO
+        : HealerTrigger.FULL_AUTO;
+
+      this.logger.log(
+        `Triggering auto-healing for ${subdomain || application.domain} ` +
+        `(mode: ${application.healingMode}, health: ${diagnosis.healthScore}, ` +
+        `issues: ${diagnosis.issuesFound}, critical: ${diagnosis.criticalIssues})`
+      );
+
+      // Trigger healing asynchronously (don't wait for completion)
+      this.healingOrchestrator.heal(
+        application.id,
+        trigger,
+        'auto-diagnosis-trigger',
+        { subdomain }
+      ).catch((error) => {
+        const err = error as Error;
+        this.logger.error(
+          `Auto-healing failed for ${subdomain || application.domain}: ${err.message}`
+        );
+      });
+
+      this.logger.log(`Auto-healing triggered successfully for ${subdomain || application.domain}`);
+
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Failed to trigger auto-healing: ${err.message}`);
+    }
   }
 
 }

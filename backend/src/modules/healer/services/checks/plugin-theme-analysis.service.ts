@@ -335,7 +335,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --format=json',
+        'plugin list --format=json --skip-themes',
       );
 
       const plugins = JSON.parse(result);
@@ -381,7 +381,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --status=active --format=json',
+        'plugin list --status=active --format=json --skip-themes',
       );
 
       const activePlugins = JSON.parse(result);
@@ -437,7 +437,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'theme list --format=json',
+        'theme list --format=json --skip-plugins',
       );
 
       const themes = JSON.parse(result);
@@ -482,7 +482,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --status=inactive --format=json',
+        'plugin list --status=inactive --format=json --skip-themes',
       );
 
       const inactivePlugins = JSON.parse(result);
@@ -536,12 +536,12 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const pluginsResult = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --format=json',
+        'plugin list --format=json --skip-themes',
       );
       const themesResult = await this.wpCli.execute(
         serverId,
         sitePath,
-        'theme list --format=json',
+        'theme list --format=json --skip-plugins',
       );
 
       const plugins = JSON.parse(pluginsResult);
@@ -633,7 +633,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --format=json',
+        'plugin list --format=json --skip-themes',
       );
 
       const plugins = JSON.parse(result);
@@ -683,7 +683,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const pluginsResult = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --format=json',
+        'plugin list --format=json --skip-themes',
       );
 
       const plugins = JSON.parse(pluginsResult);
@@ -778,7 +778,7 @@ export class PluginThemeAnalysisService implements IDiagnosisCheckService {
       const result = await this.wpCli.execute(
         serverId,
         sitePath,
-        'plugin list --status=active --format=json',
+        'plugin list --status=active --format=json --skip-themes',
       );
 
       const activePlugins = JSON.parse(result);

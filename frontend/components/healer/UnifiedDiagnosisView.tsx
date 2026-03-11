@@ -130,7 +130,7 @@ export function UnifiedDiagnosisView({ siteId, selectedSubdomain }: UnifiedDiagn
               <div className="flex items-center gap-6 mb-6">
                 <div className="text-center">
                   <div className="text-5xl font-bold text-primary">
-                    {diagnosisResult.healthScore}
+                    {Math.round(diagnosisResult.healthScore)}
                   </div>
                   <div className="text-sm text-muted-foreground">Health Score</div>
                 </div>

@@ -184,3 +184,13 @@ export function useHealApplication() {
     },
   });
 }
+
+// Get diagnosis history
+export function useDiagnosisHistory(id: string, limit: number = 5) {
+  return useQuery({
+    queryKey: [...healerKeys.application(id), 'history'],
+    queryFn: () => healerApi.getDiagnosisHistory(id, { limit, page: 1 }),
+    enabled: !!id,
+    staleTime: 30000, // Consider data fresh for 30 seconds
+  });
+}

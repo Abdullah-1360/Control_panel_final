@@ -130,7 +130,11 @@ export class ChecksumVerificationService implements IDiagnosisCheckService {
 
   private async getWordPressVersion(serverId: string, sitePath: string): Promise<string | null> {
     try {
-      const versionOutput = await this.wpCli.execute(serverId, sitePath, 'core version');
+      const versionOutput = await this.wpCli.execute(
+        serverId, 
+        sitePath, 
+        'core version --skip-plugins --skip-themes'
+      );
       return versionOutput.trim();
     } catch (error) {
       this.logger.error('Failed to get WordPress version:', error);
@@ -141,7 +145,7 @@ export class ChecksumVerificationService implements IDiagnosisCheckService {
   private async verifyCoreChecksums(serverId: string, sitePath: string, version: string): Promise<any> {
     try {
       // Use WP-CLI to verify core files
-      const command = 'core verify-checksums';
+      const command = 'core verify-checksums --skip-plugins --skip-themes';
       const result = await this.wpCli.execute(serverId, sitePath, command);
       
       const verificationResult = {

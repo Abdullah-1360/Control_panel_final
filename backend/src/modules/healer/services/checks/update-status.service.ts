@@ -85,7 +85,12 @@ export class UpdateStatusService implements IDiagnosisCheckService {
 
   private async getPluginVersions(serverId: string, sitePath: string): Promise<any[]> {
     try {
-      const result = await this.wpCli.execute(serverId, sitePath, 'plugin list --status=active --format=json', 15000);
+      const result = await this.wpCli.execute(
+        serverId, 
+        sitePath, 
+        'plugin list --status=active --format=json --skip-themes', 
+        15000
+      );
       const plugins = JSON.parse(result || '[]');
       return plugins.map((p: any) => ({
         name: p.name,
@@ -121,7 +126,12 @@ export class UpdateStatusService implements IDiagnosisCheckService {
 
   private async checkPluginUpdates(serverId: string, sitePath: string): Promise<any[]> {
     try {
-      const result = await this.wpCli.execute(serverId, sitePath, 'plugin list --update=available --format=json', 15000);
+      const result = await this.wpCli.execute(
+        serverId, 
+        sitePath, 
+        'plugin list --update=available --format=json --skip-themes', 
+        15000
+      );
       return JSON.parse(result || '[]');
     } catch (error) {
       return [];

@@ -97,6 +97,10 @@ export class DiagnoseApplicationDto {
   @IsString()
   @IsOptional()
   subdomain?: string;
+
+  @IsString()
+  @IsOptional()
+  profile?: string; // DiagnosisProfile: FULL, LIGHT, QUICK, CUSTOM
 }
 
 export class HealApplicationDto {

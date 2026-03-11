@@ -8,6 +8,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useApplications, useDeleteApplication } from '@/hooks/use-healer';
 import { useServers } from '@/hooks/use-servers';
 import { Search, Plus, Server, ArrowLeft, CheckCircle, AlertCircle, Shield, Grid, List as ListIcon, X } from 'lucide-react';
@@ -121,6 +122,13 @@ export function UniversalHealerView() {
     search: searchQuery || undefined,
     techStack: techStackFilter !== 'all' ? techStackFilter : undefined,
     healthStatus: healthFilter !== 'all' ? healthFilter : undefined,
+  });
+
+  // Fetch dashboard stats
+  const { data: dashboardStats } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: () => healerApi.getDashboardStats(),
+    refetchInterval: 30000, // Refetch every 30 seconds
   });
 
   // Fetch selected application details
@@ -435,10 +443,10 @@ export function UniversalHealerView() {
 
   // Render list view
   if (currentView === 'list') {
-    const totalApps = applicationsData?.pagination?.total || 0;
-    const healthyApps = applicationsData?.data?.filter(a => a.healthStatus === 'HEALTHY').length || 0;
-    const issueApps = applicationsData?.data?.filter(a => a.healthStatus === 'DOWN' || a.healthStatus === 'DEGRADED').length || 0;
-    const protectedApps = applicationsData?.data?.filter(a => a.isHealerEnabled).length || 0;
+    const totalApps = dashboardStats?.totalApps || 0;
+    const healthyApps = dashboardStats?.healthyApps || 0;
+    const issueApps = dashboardStats?.issueApps || 0;
+    const protectedApps = dashboardStats?.protectedApps || 0;
     const hasActiveFilters = searchQuery || techStackFilter !== 'all' || healthFilter !== 'all';
 
     return (

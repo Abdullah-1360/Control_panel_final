@@ -8,6 +8,8 @@ import { Application } from '@/lib/api/healer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DiagnosisHistoryTab } from './DiagnosisHistoryTab';
 import { 
   Server, 
   Globe, 
@@ -19,7 +21,9 @@ import {
   Pause,
   RefreshCw,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  History,
+  Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -121,7 +125,7 @@ export function ApplicationDetailView({
                 <span>Health Score</span>
               </div>
               <div className={cn('text-3xl font-bold', getHealthScoreColor(application.healthScore))}>
-                {application.healthScore}%
+                {Math.round(application.healthScore)}%
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
@@ -130,7 +134,7 @@ export function ApplicationDetailView({
                     application.healthScore >= 90 ? 'bg-green-500' :
                     application.healthScore >= 70 ? 'bg-yellow-500' : 'bg-red-500'
                   )}
-                  style={{ width: `${application.healthScore}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, application.healthScore))}%` }}
                 />
               </div>
             </div>
@@ -199,77 +203,96 @@ export function ApplicationDetailView({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <div className="text-sm text-muted-foreground">Tech Stack</div>
-              <div className="font-medium">{techStackConfig.label}</div>
-            </div>
+          <Tabs defaultValue="details" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="details" className="flex items-center gap-2">
+                <Info className="h-4 w-4" />
+                Details
+              </TabsTrigger>
+              <TabsTrigger value="history" className="flex items-center gap-2">
+                <History className="h-4 w-4" />
+                Diagnosis History
+              </TabsTrigger>
+            </TabsList>
             
-            {application.techStackVersion && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Version</div>
-                <div className="font-medium">{application.techStackVersion}</div>
-              </div>
-            )}
-            
-            {application.metadata?.phpVersion && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">PHP Version</div>
-                <div className="font-medium">{application.metadata.phpVersion}</div>
-              </div>
-            )}
-            
-            {application.metadata?.dbName && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Database</div>
-                <div className="font-medium">{application.metadata.dbName}</div>
-              </div>
-            )}
-            
-            {application.metadata?.dbHost && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Database Host</div>
-                <div className="font-medium">{application.metadata.dbHost}</div>
-              </div>
-            )}
-            
-            {application.metadata?.domainType && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Domain Type</div>
-                <Badge variant="outline" className="capitalize">
-                  {application.metadata.domainType}
-                </Badge>
-              </div>
-            )}
-            
-            {application.metadata?.cPanelUsername && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">cPanel User</div>
-                <div className="font-medium">{application.metadata.cPanelUsername}</div>
-              </div>
-            )}
-            
-            <div className="space-y-1">
-              <div className="text-sm text-muted-foreground">Detection Method</div>
-              <div className="font-medium">{application.detectionMethod}</div>
-            </div>
-            
-            {application.lastDiagnosedAt && (
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Last Diagnosed</div>
-                <div className="font-medium">
-                  {new Date(application.lastDiagnosedAt).toLocaleString()}
+            <TabsContent value="details" className="mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <div className="text-sm text-muted-foreground">Tech Stack</div>
+                  <div className="font-medium">{techStackConfig.label}</div>
+                </div>
+                
+                {application.techStackVersion && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Version</div>
+                    <div className="font-medium">{application.techStackVersion}</div>
+                  </div>
+                )}
+                
+                {application.metadata?.phpVersion && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">PHP Version</div>
+                    <div className="font-medium">{application.metadata.phpVersion}</div>
+                  </div>
+                )}
+                
+                {application.metadata?.dbName && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Database</div>
+                    <div className="font-medium">{application.metadata.dbName}</div>
+                  </div>
+                )}
+                
+                {application.metadata?.dbHost && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Database Host</div>
+                    <div className="font-medium">{application.metadata.dbHost}</div>
+                  </div>
+                )}
+                
+                {application.metadata?.domainType && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Domain Type</div>
+                    <Badge variant="outline" className="capitalize">
+                      {application.metadata.domainType}
+                    </Badge>
+                  </div>
+                )}
+                
+                {application.metadata?.cPanelUsername && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">cPanel User</div>
+                    <div className="font-medium">{application.metadata.cPanelUsername}</div>
+                  </div>
+                )}
+                
+                <div className="space-y-1">
+                  <div className="text-sm text-muted-foreground">Detection Method</div>
+                  <div className="font-medium">{application.detectionMethod}</div>
+                </div>
+                
+                {application.lastDiagnosedAt && (
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Last Diagnosed</div>
+                    <div className="font-medium">
+                      {new Date(application.lastDiagnosedAt).toLocaleString()}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="space-y-1">
+                  <div className="text-sm text-muted-foreground">Created</div>
+                  <div className="font-medium">
+                    {new Date(application.createdAt).toLocaleString()}
+                  </div>
                 </div>
               </div>
-            )}
+            </TabsContent>
             
-            <div className="space-y-1">
-              <div className="text-sm text-muted-foreground">Created</div>
-              <div className="font-medium">
-                {new Date(application.createdAt).toLocaleString()}
-              </div>
-            </div>
-          </div>
+            <TabsContent value="history" className="mt-4">
+              <DiagnosisHistoryTab applicationId={application.id} />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 

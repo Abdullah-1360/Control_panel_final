@@ -40,7 +40,7 @@ export class WordPressPlugin implements IStackPlugin {
         const versionOutput = await this.wpCli.execute(
           server.id,
           path,
-          'core version',
+          'core version --skip-plugins --skip-themes',
         );
         version = versionOutput.trim();
       } catch (error) {
@@ -340,7 +340,7 @@ export class WordPressPlugin implements IStackPlugin {
       const output = await this.wpCli.execute(
         server.id,
         application.path,
-        'core check-update --format=json',
+        'core check-update --format=json --skip-plugins --skip-themes',
       );
       
       const updates = JSON.parse(output || '[]');
@@ -482,7 +482,7 @@ export class WordPressPlugin implements IStackPlugin {
       const output = await this.wpCli.execute(
         server.id,
         application.path,
-        'db check',
+        'db check --skip-plugins --skip-themes',
       );
       
       if (output.toLowerCase().includes('error') || output.toLowerCase().includes('corrupt')) {

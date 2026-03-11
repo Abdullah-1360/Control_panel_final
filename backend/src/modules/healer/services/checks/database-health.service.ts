@@ -218,7 +218,12 @@ export class DatabaseHealthService implements IDiagnosisCheckService {
    */
   private async checkDatabaseSize(serverId: string, sitePath: string): Promise<any> {
     try {
-      const result = await this.wpCli.execute(serverId, sitePath, 'db size', 15000);
+      const result = await this.wpCli.execute(
+        serverId, 
+        sitePath, 
+        'db size --skip-plugins --skip-themes', 
+        15000
+      );
       
       // Parse wp db size output format:
       // Name	Size

@@ -110,7 +110,7 @@ export function DiscoveredApplicationsList() {
                   </div>
                   <div className="text-right">
                     <div className="text-2xl font-bold">
-                      {app.healthScore !== null ? `${app.healthScore}%` : 'N/A'}
+                      {app.healthScore !== null ? `${Math.round(app.healthScore)}%` : 'N/A'}
                     </div>
                     <p className="text-xs text-muted-foreground">Health Score</p>
                   </div>

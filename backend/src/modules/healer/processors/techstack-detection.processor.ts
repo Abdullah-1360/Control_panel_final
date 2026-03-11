@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { ApplicationService } from '../services/application.service';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { SiteTechStackService } from '../services/site-tech-stack.service';
 
 interface TechStackDetectionJob {
   applicationId: string;
@@ -21,6 +22,7 @@ export class TechStackDetectionProcessor extends WorkerHost {
     private readonly applicationService: ApplicationService,
     private readonly auditService: AuditService,
     private readonly prisma: PrismaService,
+    private readonly siteTechStackService: SiteTechStackService,
   ) {
     super();
   }
@@ -64,6 +66,27 @@ export class TechStackDetectionProcessor extends WorkerHost {
       if (!subdomain) {
         // Increment detection attempts
         const newAttempts = (app.detectionAttempts || 0) + 1;
+        
+        // Save tech stack to persistent table
+        if (result.techStack !== 'UNKNOWN') {
+          try {
+            await this.siteTechStackService.saveTechStack(applicationId, {
+              techStack: result.techStack,
+              techStackVersion: result.version,
+              detectionMethod: 'AUTO',
+              detectionConfidence: result.confidence,
+              isMainDomain: true,
+              isSubdomain: false,
+              isParkedDomain: false,
+              isAddonDomain: false,
+              metadata: {},
+            });
+            
+            this.logger.log(`Tech stack persisted to site_tech_stack table for ${app.domain}`);
+          } catch (error) {
+            this.logger.error(`Failed to persist tech stack to site_tech_stack table:`, error);
+          }
+        }
         
         // If still UNKNOWN after 5 attempts, create audit log and reset counter
         if (result.techStack === 'UNKNOWN' && newAttempts >= 5) {

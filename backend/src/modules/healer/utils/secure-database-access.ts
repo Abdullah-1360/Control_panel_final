@@ -36,38 +36,41 @@ export class SecureDatabaseAccess {
     console.log('[SecureDatabaseAccess] Creating config file:', configFile);
     console.log('[SecureDatabaseAccess] Config (password hidden):', configContent.replace(dbConfig.password, '***'));
     
-    // Split into lines and use printf for each line (more reliable than heredoc over SSH)
-    const lines = configContent.split('\n').filter(line => line.trim() || line === '');
-    const commands: string[] = [];
+    // Create config file using cat with heredoc (simpler and more reliable)
+    const escapedPassword = dbConfig.password.replace(/'/g, "'\\''");
+    const createCommand = `cat > ${configFile} << 'EOF'
+[client]
+host=${dbConfig.host}
+user=${dbConfig.user}
+password=${escapedPassword}
+database=${dbConfig.name}
+EOF`;
     
-    lines.forEach((line, index) => {
-      // Escape single quotes in the line
-      const escapedLine = line.replace(/'/g, "'\\''");
-      
-      if (index === 0) {
-        // First line: create file
-        commands.push(`printf '%s\\n' '${escapedLine}' > ${configFile}`);
-      } else {
-        // Subsequent lines: append
-        commands.push(`printf '%s\\n' '${escapedLine}' >> ${configFile}`);
+    try {
+      const result = await this.sshExecutor.executeCommandDetailed(serverId, createCommand, 10000);
+      if (!result.success) {
+        console.error('[SecureDatabaseAccess] Failed to create config file:', result.error);
+        throw new Error(`Failed to create config file: ${result.error}`);
       }
-    });
+      console.log('[SecureDatabaseAccess] Config file created successfully');
+    } catch (error) {
+      console.error('[SecureDatabaseAccess] Error creating config file:', error);
+      throw error;
+    }
     
-    // Add chmod command
-    commands.push(`chmod 600 ${configFile}`);
-    
-    const createCommand = commands.join(' && ');
-    console.log('[SecureDatabaseAccess] Create command length:', createCommand.length);
-    
-    const result = await this.sshExecutor.executeCommand(serverId, createCommand, 5000);
-    console.log('[SecureDatabaseAccess] Config file created, result:', result);
+    // Set secure permissions
+    try {
+      await this.sshExecutor.executeCommandDetailed(serverId, `chmod 600 ${configFile}`, 5000);
+    } catch (error) {
+      console.warn('[SecureDatabaseAccess] Failed to chmod config file (non-critical):', error);
+    }
     
     // Verify file was created
     const verifyCommand = `test -f ${configFile} && echo "exists" || echo "not_found"`;
-    const verifyResult = await this.sshExecutor.executeCommand(serverId, verifyCommand, 5000);
-    console.log('[SecureDatabaseAccess] Config file verification:', verifyResult.trim());
+    const verifyResult = await this.sshExecutor.executeCommandDetailed(serverId, verifyCommand, 5000);
+    console.log('[SecureDatabaseAccess] Config file verification:', verifyResult.output?.trim());
     
-    if (verifyResult.trim() !== 'exists') {
+    if (verifyResult.output?.trim() !== 'exists') {
       throw new Error('Failed to create MySQL config file');
     }
   }
@@ -111,7 +114,7 @@ export class SecureDatabaseAccess {
     } finally {
       // Always clean up config file
       try {
-        await this.sshExecutor.executeCommand(serverId, `rm -f ${configFile}`, 5000);
+        await this.sshExecutor.executeCommandDetailed(serverId, `rm -f ${configFile}`, 5000);
         console.log('[SecureDatabaseAccess] Config file cleaned up');
       } catch (error) {
         console.error('[SecureDatabaseAccess] Failed to clean up config file:', error);

@@ -32,7 +32,7 @@ export class CoreIntegrityService implements IDiagnosisCheckService {
       const checksumOutput = await this.wpCli.execute(
         serverId,
         sitePath,
-        'core verify-checksums',
+        'core verify-checksums --skip-plugins --skip-themes',
       );
 
       const hasErrors = checksumOutput.toLowerCase().includes('error') ||

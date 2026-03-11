@@ -69,9 +69,20 @@ import { TechStackDetectorService } from './services/tech-stack-detector.service
 import { HealingStrategyEngineService } from './services/healing-strategy-engine.service';
 import { CircuitBreakerService } from './services/circuit-breaker.service';
 import { BackupRollbackService } from './services/backup-rollback.service';
+import { SiteTechStackService } from './services/site-tech-stack.service';
+// Phase 1: Tech-Stack-Aware Healing Infrastructure
+import { TechStackAwareHealingOrchestratorService } from './services/tech-stack-aware-healing-orchestrator.service';
+import { IntelligentBackupService } from './services/intelligent-backup.service';
+import { DomainAwareHealingService } from './services/domain-aware-healing.service';
+// Phase 2: WordPress Healing Services
+import { WordPressHealingService } from './services/wordpress-healing.service';
+import { DatabaseCredentialHealingService } from './services/database-credential-healing.service';
+import { BinarySearchPluginConflictService } from './services/binary-search-plugin-conflict.service';
 // Universal Healer: Discovery Queue System
 import { DiscoveryQueueService } from './services/discovery-queue.service';
+import { DiagnosisQueueService } from './services/diagnosis-queue.service';
 import { DiscoveryProcessor } from './processors/discovery.processor';
+import { DiagnosisProcessor } from './processors/diagnosis.processor';
 import { MetadataCollectionProcessor } from './processors/metadata-collection.processor';
 import { SubdomainDetectionProcessor } from './processors/subdomain-detection.processor';
 import { TechStackDetectionProcessor } from './processors/techstack-detection.processor';
@@ -83,6 +94,7 @@ import { ExpressPlugin } from './plugins/express.plugin';
 import { NextJsPlugin } from './plugins/nextjs.plugin';
 import { MySQLPlugin } from './plugins/mysql.plugin';
 import { WordPressPlugin } from './plugins/wordpress.plugin';
+import { AutoDiagnosisSchedulerService } from './services/auto-diagnosis-scheduler.service';
 // Universal Healer: Controllers
 import { ApplicationController } from './controllers/application.controller';
 
@@ -106,6 +118,9 @@ import { ApplicationController } from './controllers/application.controller';
     }),
     BullMQModule.registerQueue({
       name: 'healer-techstack-detection',
+    }),
+    BullMQModule.registerQueue({
+      name: 'healer-diagnosis',
     }),
   ],
   controllers: [
@@ -178,9 +193,21 @@ import { ApplicationController } from './controllers/application.controller';
     HealingStrategyEngineService,
     CircuitBreakerService,
     BackupRollbackService,
+    SiteTechStackService,
+    // Phase 1: Tech-Stack-Aware Healing Infrastructure
+    TechStackAwareHealingOrchestratorService,
+    IntelligentBackupService,
+    DomainAwareHealingService,
+    // Phase 2: WordPress Healing Services
+    WordPressHealingService,
+    DatabaseCredentialHealingService,
+    BinarySearchPluginConflictService,
     // Universal Healer: Discovery Queue System
     DiscoveryQueueService,
+    DiagnosisQueueService,
+    AutoDiagnosisSchedulerService, // Automatic diagnosis scheduler
     DiscoveryProcessor,
+    DiagnosisProcessor,
     MetadataCollectionProcessor,
     SubdomainDetectionProcessor,
     TechStackDetectionProcessor,
@@ -193,6 +220,6 @@ import { ApplicationController } from './controllers/application.controller';
     MySQLPlugin,
     WordPressPlugin,
   ],
-  exports: [HealerService, UnifiedDiagnosisService, ApplicationService, DiscoveryQueueService],
+  exports: [HealerService, UnifiedDiagnosisService, ApplicationService, DiscoveryQueueService, DiagnosisQueueService],
 })
 export class HealerModule {}

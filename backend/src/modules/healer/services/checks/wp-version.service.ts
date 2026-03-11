@@ -25,14 +25,19 @@ export class WpVersionService implements IDiagnosisCheckService {
     const recommendations: string[] = [];
 
     try {
-      const versionOutput = await this.wpCli.execute(serverId, sitePath, 'core version');
+      // Skip plugins to avoid plugin conflicts during WP-CLI execution
+      const versionOutput = await this.wpCli.execute(
+        serverId, 
+        sitePath, 
+        'core version --skip-plugins --skip-themes'
+      );
       const currentVersion = versionOutput.trim();
 
       // Check for updates
       const updateOutput = await this.wpCli.execute(
         serverId,
         sitePath,
-        'core check-update --format=json',
+        'core check-update --format=json --skip-plugins --skip-themes',
       );
       
       let updates = [];

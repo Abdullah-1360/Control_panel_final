@@ -150,7 +150,7 @@ export function SubdomainConfigModal({
               <div>
                 <span className="text-muted-foreground">Health Score:</span>
                 <span className="ml-2 font-medium">
-                  {currentConfig.healthScore !== undefined ? `${currentConfig.healthScore}%` : 'N/A'}
+                  {currentConfig.healthScore !== undefined ? `${Math.round(currentConfig.healthScore)}%` : 'N/A'}
                 </span>
               </div>
               <div>
